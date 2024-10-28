@@ -1,0 +1,31 @@
+PEN(
+  (conv1): Conv1d(3, 128, kernel_size=(3,), stride=(1,), padding=(1,))
+  (bn1): BatchNorm1d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+  (relu): ReLU()
+  (pool): MaxPool1d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+  (conv2): Conv1d(128, 128, kernel_size=(3,), stride=(1,), padding=(1,))
+  (bn2): BatchNorm1d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+  (conv3): Conv1d(128, 128, kernel_size=(2,), stride=(1,), padding=(1,))
+  (bn3): BatchNorm1d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+  (lstm): LSTM(3, 128, num_layers=2, batch_first=True)
+  (fc): Linear(in_features=256, out_features=6, bias=True)
+)
+
+Accuracy: 69.15%
+Balanced Accuracy: 65.92%
+F1 Score: 72.54%
+Precision: 79.76%
+Confusion Matrix:
+[[0.04 0.   0.   0.   0.02 0.01]
+ [0.01 0.26 0.   0.   0.04 0.01]
+ [0.   0.   0.03 0.   0.   0.  ]
+ [0.   0.   0.   0.02 0.01 0.  ]
+ [0.02 0.   0.   0.   0.05 0.01]
+ [0.08 0.01 0.   0.   0.06 0.27]]
+Confusion Matrix (row normalization):
+[[0.56 0.03 0.   0.01 0.23 0.17]
+ [0.03 0.83 0.   0.   0.12 0.02]
+ [0.12 0.   0.86 0.   0.01 0.  ]
+ [0.09 0.   0.01 0.51 0.29 0.1 ]
+ [0.25 0.04 0.01 0.01 0.55 0.15]
+ [0.18 0.03 0.   0.   0.14 0.65]]
