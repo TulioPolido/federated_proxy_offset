@@ -1,11 +1,12 @@
 # Jupyter Notebooks and python script for the Viva Bem Software Deliveries
-This model results from the Federated Learning (FL) research line. In this deliverable, we present a centralized model for activities recognition. The model uses three accelerometer axis (x, y and z) transformed into recurrence plots as input. 
+This model results from the Federated Learning (FL) research line. In this deliverable, we present a federated simulation model for activity recognition. The model uses three accelerometer axis (x, y and z) transformed into recurrence plots as input.
+The objective of this research is to explore new solutions to HAR problems that demonstrate strong performance and contribute new knowledge to the field.
 
 ## Getting Started
 
 **The Viva Bem software delivery** is a Jupyter Notebook. This material encapsulates all the process steps and important details.
 
-Before you running our code, you must go to the [Artifactory repository](aiunica-generic-local/data_delivery/6.0.0/A7/viva_bem_dataset/data_flmodel/) and download the corresponding dataset in the path: data/.
+Before you running our code, you must go to the [Bart repository](aiunica-generic-local/data_delivery/6.0.0/A7/viva_bem_dataset/data_flmodel/) and download the corresponding dataset in the path: data/.
 
 [Jupyter notebooks](https://jupyter.org/) allow a high-level of interactive learning, as code, text description, and visualization combined in one place.
 
