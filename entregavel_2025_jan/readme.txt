@@ -6,7 +6,8 @@ The objective of this research is to explore new solutions to HAR problems that 
 
 **The Viva Bem software delivery** is a Jupyter Notebook. This material encapsulates all the process steps and important details.
 
-Before you running our code, you must go to the [Bart repository](aiunica-generic-local/data_delivery/6.0.0/A7/viva_bem_dataset/data_flmodel/) and download the corresponding dataset in the path: data/.
+Before you running our code, you must go to the [eBART repository](https://bart.ecodesamsung.com/artifactory/srbr-aiunica-generic-local/data_delivery/7.0.0/A2/public_datasets/multiclassActivityClassification_fl/wisdm_36users/) and download the corresponding dataset.
+If you have the preprocessed recurrence plot files (named preprocessed_user_{1-36}.pt), the parameter named PREPROCESS_PLOTS should be set to False.
 
 [Jupyter notebooks](https://jupyter.org/) allow a high-level of interactive learning, as code, text description, and visualization combined in one place.
 
