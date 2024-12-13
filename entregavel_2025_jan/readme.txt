@@ -151,7 +151,9 @@ To run Jupyter Notebook, open an Anaconda prompt and navigate to the directory i
 This should open Jupyter Notebooks in a browser window. On occasion, Jupyter may not be able to open a window and will give you a URL to paste in your browser. Please do so, if required.
 
 ### Running the python script
+Before running the script, make sure the PATH property (line 36) points to the folder where the dataset (WISDM_ar_v1.1_balanced.csv) is located.
+Also, in line 538, the resources should match the capabilities of the machine used for testing.
 
-To run the Python script, open an Anaconda prompt and navigate to the directory where the cloned repository is located. Next, go into the <code>src</code> folder to run the following command with the parameter values that gave us the best performance:
-
+To run the Python script, open an Anaconda prompt and navigate to the directory where the cloned repository is located. 
+Next, go into the <code>src</code> folder to run the following command with the parameter values that gave us the best performance:
 python3 main.py
