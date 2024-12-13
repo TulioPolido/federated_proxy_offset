@@ -263,7 +263,7 @@ batch = next(iter(test_loader))
 data, labels = batch["data"], batch["label"]
 x_shape = data.shape
 y_shape = labels.shape
-x_shape, y_shape
+print(f"x_shape: {x_shape}, y_shape: {y_shape}")
 
 class ModifiedMobileNetV2(nn.Module):
     def __init__(self, num_classes):
