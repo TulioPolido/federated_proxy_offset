@@ -33,7 +33,7 @@ print(f"Training on {DEVICE}")
 print(f"Flower {flwr.__version__} / PyTorch {torch.__version__}")
 
 # Define the path to the dataset and the sequence length
-PATH = '../datasets/'
+PATH = 'C:/Users/tulio/repos/Mestrado/dissertacao/code/datasets/'
 NUM_CLIENTS_TRAIN = 27
 NUM_CLIENTS_TEST = 9
 NUM_CLASSES = 4
@@ -50,7 +50,7 @@ def normalize_group(group):
     return group
 
 # Load data from file
-df = pd.read_csv(f"{PATH}/WISDM_ar_v1.1_balanced.csv", header=None, names=['user_id', 'activity', 'timestamp', 'x', 'y', 'z'])
+df = pd.read_csv(f"{PATH}WISDM_ar_v1.1_balanced.csv", header=None, names=['user_id', 'activity', 'timestamp', 'x', 'y', 'z'])
 if(NUM_CLASSES == 4):
     # Filter for specific activities
     df = df.loc[
