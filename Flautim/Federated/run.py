@@ -1,7 +1,7 @@
 from flautim.pytorch.common import run_federated, weighted_average
 import RecurrenceModel
-import RecurrenceDataset
-import RecurrenceExperiment
+import FedRecurrenceDataset
+import FedRecurrenceExperiment
 import flwr
 from flwr.common import ndarrays_to_parameters
 from flwr.server import ServerConfig, ServerAppComponents
@@ -12,8 +12,8 @@ NUM_CLASSES = 7
 NUM_CHANNELS = 6
 LEARNING_RATE = 5e-4
 BATCH_SIZE = 16
-EPOCHS = 5
-ROUNDS = 40
+NUM_EPOCHS = 10
+NUM_ROUNDS = 150
 
 
 def fit_config(server_round):
@@ -41,7 +41,7 @@ def generate_server_fn(context, eval_fn):
                 on_evaluate_config_fn=fit_config
             )
 
-            config = ServerConfig(num_rounds=ROUNDS)
+            config = ServerConfig(num_rounds=NUM_ROUNDS)
             return ServerAppComponents(config=config, strategy=strategy)
         except Exception as e:
             print(f"Error in create_server_fn: {e}")
@@ -60,17 +60,17 @@ def generate_client_fn(context, files):
                 num_channels=NUM_CHANNELS,
                 suffix = cid
             )
-            dataset = RecurrenceDataset.RecurrenceDataset(
+            dataset = FedRecurrenceDataset.RecurrenceDataset(
                 file,
                 batch_size=BATCH_SIZE,
                 shuffle=True
             )
-            return RecurrenceExperiment.RecurrenceExperiment(
+            return FedRecurrenceExperiment.RecurrenceExperiment(
                 model,
                 dataset,
                 context,
                 lr=LEARNING_RATE,
-                epochs=EPOCHS
+                epochs=NUM_EPOCHS
             ).to_client()
         except Exception as e:
             print(f"Error in create_client_fn: {e}")
@@ -87,17 +87,17 @@ def evaluate_fn(context, test_data):
                 num_channels=NUM_CHANNELS
             )
             model.set_parameters(parameters)
-            dataset = RecurrenceDataset.RecurrenceDataset(
+            dataset = FedRecurrenceDataset.RecurrenceDataset(
                 test_data,
                 batch_size=BATCH_SIZE,
                 shuffle=False
             )
-            experiment = RecurrenceExperiment.RecurrenceExperiment(
+            experiment = FedRecurrenceExperiment.RecurrenceExperiment(
                 model,
                 dataset,
                 context,
                 lr=LEARNING_RATE,
-                epochs=EPOCHS
+                epochs=NUM_EPOCHS
             )
 
             config["server_round"] = server_round
@@ -140,5 +140,7 @@ if __name__ == "__main__":
     # Run federated learning
     run_federated(
         client_fn=client_fn_callback,
-        server_fn=server_fn_callback, num_clients = num_clients, num_rounds = 40
+        server_fn=server_fn_callback, 
+        num_clients=num_clients, 
+        num_rounds=NUM_ROUNDS
     )
