@@ -10,10 +10,13 @@ import torch
 
 NUM_CLASSES = 7
 NUM_CHANNELS = 6
+WINDOW_SIZE = 512
+STRIDE = 384
 LEARNING_RATE = 5e-4
 BATCH_SIZE = 16
 NUM_EPOCHS = 10
 NUM_ROUNDS = 150
+WEIGHT_DECAY = 1e-3
 
 
 def fit_config(server_round):
@@ -70,7 +73,8 @@ def generate_client_fn(context, files):
                 dataset,
                 context,
                 lr=LEARNING_RATE,
-                epochs=NUM_EPOCHS
+                epochs=NUM_EPOCHS,
+                weight_decay=WEIGHT_DECAY
             ).to_client()
         except Exception as e:
             print(f"Error in create_client_fn: {e}")
@@ -97,7 +101,8 @@ def evaluate_fn(context, test_data):
                 dataset,
                 context,
                 lr=LEARNING_RATE,
-                epochs=NUM_EPOCHS
+                epochs=NUM_EPOCHS,
+                weight_decay=WEIGHT_DECAY
             )
 
             config["server_round"] = server_round
@@ -117,7 +122,7 @@ if __name__ == "__main__":
     # Load training client files
     files = [
         torch.load(
-            f"./data/PAMAP_processed_user_absFalse_512_256_{i+1}_rgb_withGyro.pt"
+            f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i + 1}_rgb_withGyro.pt"
         )
         for i in range(num_clients)
     ]
@@ -125,7 +130,7 @@ if __name__ == "__main__":
     # Load and combine test files
     test_files = [
         torch.load(
-            f"./data/PAMAP_processed_user_absFalse_512_256_{i+1}_rgb_withGyro.pt"
+            f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i + 1}_rgb_withGyro.pt"
         )
         for i in range(num_clients, num_clients + 2)
     ]
