@@ -1,3 +1,5 @@
+import random
+
 import flautim as fl
 import RecurrenceModel
 import CentRecurrenceDataset
@@ -23,8 +25,18 @@ WEIGHT_DECAY = 6.7e-5
 if __name__ == "__main__":
     context = fl.init()
     fl.log(f"Flautim inicializado!!!")
-    train_files = [8, 7, 6, 5, 4, 1]
-    test_files = [2, 3]
+
+    # All available file indices
+    all_files = [1, 2, 3, 4, 5, 6, 7, 8]
+
+    # Generate a random seed
+    seed = random.randint(0, 2**32 - 1)
+    random.seed(seed)
+    fl.log(f"Using random seed: {seed}")
+
+    # Shuffle and split
+    test_files = random.sample(all_files, 2)
+    train_files = [f for f in all_files if f not in test_files]
 
     def load_client_file(n: int):
         path = f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{n}_rgb_withGyro.pt"
