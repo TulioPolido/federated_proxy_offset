@@ -34,6 +34,14 @@ if __name__ == "__main__":
         "labels": torch.cat([d["labels"] for d in dicts], dim=0),
     }
 
+    # Shuffle
+    num_samples = data["data"].size(0)
+    indices = torch.randperm(num_samples)
+
+    # Apply the shuffle to both data and labels
+    data["data"] = data["data"][indices]
+    data["labels"] = data["labels"][indices]
+
     dataset = CentRecurrenceDatasetWithLeak.RecurrenceDataset(
         data, batch_size=BATCH_SIZE
     )
