@@ -14,11 +14,11 @@ NUM_CLASSES = 7
 NUM_CHANNELS = 6
 WINDOW_SIZE = 1024
 STRIDE = 256
-LEARNING_RATE = 4.7e-3
-LEARNING_RATE_STEP = 6
+LEARNING_RATE = 4.7e-4
+LEARNING_RATE_STEP = 30
 LEARNING_RATE_GAMMA = 0.808
 BATCH_SIZE = 32
-NUM_EPOCHS = 10
+NUM_EPOCHS = 5
 NUM_ROUNDS = 150
 WEIGHT_DECAY = 6.7e-5
 
@@ -96,7 +96,7 @@ def evaluate_fn(context, test_data):
                 context,
                 lr=LEARNING_RATE,
                 lr_step=LEARNING_RATE_STEP,
-                lr_gamma=LEARNING_RATE_GAMMA
+                lr_gamma=LEARNING_RATE_GAMMA,
                 epochs=NUM_EPOCHS,
                 weight_decay=WEIGHT_DECAY,
             )
@@ -111,50 +111,53 @@ def evaluate_fn(context, test_data):
 
 
 if __name__ == "__main__":
-    context = fl.init()
+    try:
+        context = fl.init()
 
-    # All available file indices
-    all_clients = [1, 2, 3, 4, 5, 6, 7, 8]
+        # All available file indices
+        all_clients = [1, 2, 3, 4, 5, 6, 7, 8]
 
-    # Generate a random seed
-    seed = random.randint(0, 2**32 - 1)
-    random.seed(seed)
-    fl.log(f"Using random seed: {seed}")
+        # Generate a random seed
+        seed = random.randint(0, 2**32 - 1)
+        random.seed(seed)
+        fl.log(f"Using random seed: {seed}")
 
-    # Shuffle and split
-    train_clients = random.sample(all_clients, NUM_CLIENTS)
-    test_clients = [f for f in all_clients if f not in test_files]
+        # Shuffle and split
+        train_clients = random.sample(all_clients, NUM_CLIENTS)
+        test_clients = [f for f in all_clients if f not in train_clients]
 
-    fl.log(f"Train clients: {train_clients}")
-    fl.log(f"Test clients: {test_clients}")
+        fl.log(f"Train clients: {train_clients}")
+        fl.log(f"Test clients: {test_clients}")
 
-    # Load training client files
-    files = [
-        torch.load(
-            f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{client}_rgb_withGyro.pt"
+        # Load training client files
+        files = [
+            torch.load(
+                f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{client}_rgb_withGyro.pt"
+            )
+            for client in train_clients
+        ]
+
+        # Load and combine test files
+        test_files = [
+            torch.load(
+                f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{client}_rgb_withGyro.pt"
+            )
+            for client in test_clients
+        ]
+
+        combined_test_data = {
+            "data": torch.cat([f["data"] for f in test_files], dim=0),
+            "labels": torch.cat([f["labels"] for f in test_files], dim=0),
+        }
+        client_fn_callback = generate_client_fn(context, files)
+        evaluate_fn_callback = evaluate_fn(context, combined_test_data)
+        server_fn_callback = generate_server_fn(context, eval_fn=evaluate_fn_callback)
+        # Run federated learning
+        run_federated(
+            client_fn=client_fn_callback,
+            server_fn=server_fn_callback,
+            num_clients=NUM_CLIENTS,
+            num_rounds=NUM_ROUNDS,
         )
-        for client in train_clients
-    ]
-
-    # Load and combine test files
-    test_files = [
-        torch.load(
-            f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{client}_rgb_withGyro.pt"
-        )
-        for client in test_clients
-    ]
-
-    combined_test_data = {
-        "data": torch.cat([f["data"] for f in test_files], dim=0),
-        "labels": torch.cat([f["labels"] for f in test_files], dim=0),
-    }
-    client_fn_callback = generate_client_fn(context, files)
-    evaluate_fn_callback = evaluate_fn(context, combined_test_data)
-    server_fn_callback = generate_server_fn(context, eval_fn=evaluate_fn_callback)
-    # Run federated learning
-    run_federated(
-        client_fn=client_fn_callback,
-        server_fn=server_fn_callback,
-        num_clients=NUM_CLIENTS,
-        num_rounds=NUM_ROUNDS,
-    )
+    except Exception as e:
+        fl.log(f"Error in run.py: {e}")
