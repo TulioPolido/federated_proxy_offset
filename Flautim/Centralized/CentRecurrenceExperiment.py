@@ -24,17 +24,22 @@ class RecurrenceExperiment(Experiment):
         weight_decay=1e-4,
         **kwargs,
     ):
-        super(RecurrenceExperiment, self).__init__(model, dataset, context, **kwargs)
+        try:
+            super(RecurrenceExperiment, self).__init__(
+                model, dataset, context, **kwargs
+            )
 
-        self.criterion = torch.nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.Adam(
-            self.model.parameters(), lr=lr, weight_decay=weight_decay
-        )
+            self.criterion = torch.nn.CrossEntropyLoss()
+            self.optimizer = torch.optim.Adam(
+                self.model.parameters(), lr=lr, weight_decay=weight_decay
+            )
 
-        self.scheduler = StepLR(self.optimizer, step_size=lr_step, gamma=lr_gamma)
-        self.epochs = epochs
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model.to(self.device)
+            self.scheduler = StepLR(self.optimizer, step_size=lr_step, gamma=lr_gamma)
+            self.epochs = epochs
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            self.model.to(self.device)
+        except Exception as e:
+            fl.log(f"Error in RecurreceExperiment __init__: {e}")
 
     def training_loop(self, data_loader):
         try:

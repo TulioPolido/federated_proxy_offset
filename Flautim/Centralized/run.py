@@ -23,74 +23,86 @@ WEIGHT_DECAY = 6.7e-5
 
 
 if __name__ == "__main__":
-    context = fl.init()
-    fl.log(f"Flautim inicializado!!!")
+    try:
+        context = fl.init()
+        fl.log(f"Flautim initalized!")
 
-    # All available file indices
-    all_files = [1, 2, 3, 4, 5, 6, 7, 8]
+        # All available file indices
+        all_files = [1, 2, 3, 4, 5, 6, 7, 8]
 
-    # Generate a random seed
-    seed = random.randint(0, 2**32 - 1)
-    random.seed(seed)
-    fl.log(f"Using random seed: {seed}")
+        # Generate a random seed
+        seed = random.randint(0, 2**32 - 1)
+        random.seed(seed)
+        fl.log(f"Using random seed: {seed}")
 
-    # Shuffle and split
-    test_files = random.sample(all_files, 2)
-    train_files = [f for f in all_files if f not in test_files]
+        # Shuffle and split
+        test_files = random.sample(all_files, 2)
+        train_files = [f for f in all_files if f not in test_files]
 
-    def load_client_file(n: int):
-        path = f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{n}_rgb_withGyro.pt"
-        return torch.load(path)
+        def load_client_file(n: int):
+            path = f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{n}_rgb_withGyro.pt"
+            return torch.load(path)
 
-    # Load subsets
-    train_dicts = [load_client_file(n) for n in train_files]
-    test_dicts = [load_client_file(n) for n in test_files]
+        # Load subsets
+        train_dicts = [load_client_file(n) for n in train_files]
+        test_dicts = [load_client_file(n) for n in test_files]
 
-    # Concatenate
-    train_data = {
-        "data": torch.cat([d["data"] for d in train_dicts], dim=0),
-        "labels": torch.cat([d["labels"] for d in train_dicts], dim=0),
-    }
+        fl.log(f"Files loaded")
+        # Concatenate
+        train_data = {
+            "data": torch.cat([d["data"] for d in train_dicts], dim=0),
+            "labels": torch.cat([d["labels"] for d in train_dicts], dim=0),
+        }
 
-    test_data = {
-        "data": torch.cat([d["data"] for d in test_dicts], dim=0),
-        "labels": torch.cat([d["labels"] for d in test_dicts], dim=0),
-    }
+        test_data = {
+            "data": torch.cat([d["data"] for d in test_dicts], dim=0),
+            "labels": torch.cat([d["labels"] for d in test_dicts], dim=0),
+        }
 
-    dataset = CentRecurrenceDataset.RecurrenceDataset(
-        train_data, test_data, batch_size=BATCH_SIZE
-    )
+        dataset = CentRecurrenceDataset.RecurrenceDataset(
+            train_data, test_data, batch_size=BATCH_SIZE
+        )
 
-    model = RecurrenceModel.RecurrenceModel(
-        context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS
-    )
-    experiment = CentRecurrenceExperiment.RecurrenceExperiment(
-        model,
-        dataset,
-        context,
-        lr=LEARNING_RATE,
-        epochs=NUM_EPOCHS,
-        lr_step=LEARNING_RATE_STEP,
-        lr_gamma=LEARNING_RATE_GAMMA,
-        weight_decay=WEIGHT_DECAY,
-    )
+        fl.log(f"Dataset created")
+        model = RecurrenceModel.RecurrenceModel(
+            context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS
+        )
 
-    def balanced_accuracy(y_true, y_pred):
-        # Flatten and convert to numpy array of scalars
-        y_true = np.array([int(y.item() if hasattr(y, "item") else y) for y in y_true])
-        y_pred = np.array([int(y.item() if hasattr(y, "item") else y) for y in y_pred])
+        fl.log(f"Model created")
+        experiment = CentRecurrenceExperiment.RecurrenceExperiment(
+            model,
+            dataset,
+            context,
+            lr=LEARNING_RATE,
+            epochs=NUM_EPOCHS,
+            lr_step=LEARNING_RATE_STEP,
+            lr_gamma=LEARNING_RATE_GAMMA,
+            weight_decay=WEIGHT_DECAY,
+        )
+        fl.log(f"Experiment created")
 
-        classes = np.unique(y_true)
-        recalls = []
+        def balanced_accuracy(y_true, y_pred):
+            # Flatten and convert to numpy array of scalars
+            y_true = np.array(
+                [int(y.item() if hasattr(y, "item") else y) for y in y_true]
+            )
+            y_pred = np.array(
+                [int(y.item() if hasattr(y, "item") else y) for y in y_pred]
+            )
 
-        for cls in classes:
-            tp = np.sum((y_pred == cls) & (y_true == cls))
-            fn = np.sum((y_pred != cls) & (y_true == cls))
-            recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-            recalls.append(recall)
+            classes = np.unique(y_true)
+            recalls = []
 
-        return np.mean(recalls)
+            for cls in classes:
+                tp = np.sum((y_pred == cls) & (y_true == cls))
+                fn = np.sum((y_pred != cls) & (y_true == cls))
+                recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+                recalls.append(recall)
 
-    flm.Metrics.balanced_accuracy = balanced_accuracy
+            return np.mean(recalls)
 
-    experiment.run(metrics={"ACCURACY": flm.Metrics.balanced_accuracy})
+        flm.Metrics.balanced_accuracy = balanced_accuracy
+
+        experiment.run(metrics={"ACCURACY": flm.Metrics.balanced_accuracy})
+    except Exception as e:
+        fl.log(f"Error in run.py: {e}")
