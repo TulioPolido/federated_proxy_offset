@@ -39,7 +39,7 @@ class RecurrenceExperiment(Experiment):
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             self.model.to(self.device)
         except Exception as e:
-            fl.log(f"Error in RecurreceExperiment __init__: {e}")
+            fl.log(f"Error in RecurreceExperiment __init__(): {e}")
 
     def training_loop(self, data_loader):
         try:
@@ -76,7 +76,7 @@ class RecurrenceExperiment(Experiment):
                 "TRAIN_F1": f1,
             }
         except Exception as e:
-            fl.log(f"Error in training loop: {e}")
+            fl.log(f"Error in RecurreceExperiment training_loop(): {e}")
 
     def validation_loop(self, data_loader):
         try:
@@ -110,4 +110,4 @@ class RecurrenceExperiment(Experiment):
                 "TEST_CONF": str(conf_matrix),
             }
         except Exception as e:
-            fl.log(f"Error in validation loop: {e}")
+            fl.log(f"Error in RecurreceExperiment validation_loop(): {e}")
