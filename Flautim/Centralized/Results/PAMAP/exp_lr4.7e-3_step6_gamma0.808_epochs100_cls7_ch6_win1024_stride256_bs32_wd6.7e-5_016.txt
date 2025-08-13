@@ -1,0 +1,35 @@
+=== Experiment Parameters ===
+exp JITTER
+lr 4.7e-3
+step 6
+gamma 0.808
+epochs 100
+cls 7
+ch 6
+win 1024
+stride 256
+bs 32
+wd 6.7e-5
+016
+
+=== Best Epoch Results per Experiment ===
+
+Experiment A:
+Balanced Accuracy: 0.8098471569186902
+Precision: 0.8205314713593856
+F1 Score: 0.8139991453301835
+
+Experiment B:
+Balanced Accuracy: 0.6048675317867561
+Precision: 0.6673481804645774
+F1 Score: 0.6158910704579548
+
+Experiment C:
+Balanced Accuracy: 0.8749249157642913
+Precision: 0.8691946576730882
+F1 Score: 0.8671168080419654
+
+=== Average Across Experiments ===
+Average Balanced Accuracy: 0.7632
+Average Precision: 0.7857
+Average F1 Score: 0.7657
