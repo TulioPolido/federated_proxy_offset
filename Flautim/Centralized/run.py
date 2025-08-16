@@ -1,14 +1,13 @@
 import random
 
+import torch
+import numpy as np
 import flautim as fl
+import flautim.metrics as flm
 import RecurrenceModel
 import CentRecurrenceDataset
 import CentRecurrenceExperiment
-import numpy as np
-import pandas as pd
-import flautim.metrics as flm
 
-import torch
 
 LEARNING_RATE = 4.7e-3
 LEARNING_RATE_STEP = 6
@@ -25,7 +24,7 @@ WEIGHT_DECAY = 6.7e-5
 if __name__ == "__main__":
     try:
         context = fl.init()
-        fl.log(f"Flautim initalized!")
+        fl.log("Flautim initalized!")
 
         # All available file indices
         all_files = [1, 2, 3, 4, 5, 6, 7, 8]
@@ -33,7 +32,7 @@ if __name__ == "__main__":
         # Generate a random seed
         seed = random.randint(0, 2**32 - 1)
         random.seed(seed)
-        fl.log(f"Using random seed: {seed}")
+        fl.log("Using random seed: {seed}")
 
         # Shuffle and split
         test_files = random.sample(all_files, 2)
@@ -47,7 +46,7 @@ if __name__ == "__main__":
         train_dicts = [load_client_file(n) for n in train_files]
         test_dicts = [load_client_file(n) for n in test_files]
 
-        fl.log(f"Files loaded")
+        fl.log("Files loaded")
         # Concatenate
         train_data = {
             "data": torch.cat([d["data"] for d in train_dicts], dim=0),
@@ -60,15 +59,22 @@ if __name__ == "__main__":
         }
 
         dataset = CentRecurrenceDataset.RecurrenceDataset(
-            train_data, test_data, batch_size=BATCH_SIZE
+            train_data,
+            test_data,
+            batch_size=BATCH_SIZE,
+            augment_multiplier=2,
+            use_crop=False,
+            use_erase=False,
+            use_jitter=False,
+            use_rotation=True
         )
 
-        fl.log(f"Dataset created")
+        fl.log("Dataset created")
         model = RecurrenceModel.RecurrenceModel(
             context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS
         )
 
-        fl.log(f"Model created")
+        fl.log("Model created")
         experiment = CentRecurrenceExperiment.RecurrenceExperiment(
             model,
             dataset,
@@ -79,7 +85,7 @@ if __name__ == "__main__":
             lr_gamma=LEARNING_RATE_GAMMA,
             weight_decay=WEIGHT_DECAY,
         )
-        fl.log(f"Experiment created")
+        fl.log("Experiment created")
 
         def balanced_accuracy(y_true, y_pred):
             # Flatten and convert to numpy array of scalars
