@@ -1,0 +1,35 @@
+=== Experiment Parameters ===
+exp ROTATION 2x
+lr 4.7e-3
+step 6
+gamma 0.808
+epochs 100
+cls 7
+ch 6
+win 1024
+stride 256
+bs 32
+wd 6.7e-5
+021
+
+=== Best Epoch Results per Experiment ===
+
+Experiment A:
+Balanced Accuracy: 0.9118525995200429
+Precision: 0.9086351629066
+F1 Score: 0.905453760001004
+
+Experiment B:
+Balanced Accuracy: 0.8165360972629305
+Precision: 0.7952929926448241
+F1 Score: 0.7928023101526046
+
+Experiment C:
+Balanced Accuracy: 0.7175375320273393
+Precision: 0.7142752767170354
+F1 Score: 0.6811511155003177
+
+=== Average Across Experiments ===
+Average Balanced Accuracy: 0.8153
+Average Precision: 0.8061
+Average F1 Score: 0.7931
