@@ -62,11 +62,11 @@ if __name__ == "__main__":
             train_data,
             test_data,
             batch_size=BATCH_SIZE,
-            augment_multiplier=2,
+            augment_multiplier=12,
             use_crop=False,
-            use_erase=False,
+            use_erase=True,
             use_jitter=False,
-            use_rotation=True
+            use_rotation=False,
         )
 
         fl.log("Dataset created")
