@@ -62,10 +62,10 @@ if __name__ == "__main__":
             train_data,
             test_data,
             batch_size=BATCH_SIZE,
-            augment_multiplier=12,
+            augment_multiplier=6,
             use_crop=False,
-            use_erase=True,
-            use_jitter=False,
+            use_erase=False,
+            use_jitter=True,
             use_rotation=False,
         )
 

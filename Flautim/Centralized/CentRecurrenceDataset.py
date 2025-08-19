@@ -48,7 +48,7 @@ class RecurrenceDataset(Dataset):
             self.jitter = T.ColorJitter(
                 brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05
             )
-            self.crop = T.RandomResizedCrop(size=128, scale=(0.75, 0.95))
+            self.random_crop = T.RandomResizedCrop(size=128, scale=(0.75, 0.95))
             self.erase = T.RandomErasing(
                 p=1, scale=(0.02, 0.2), ratio=(0.3, 3.3), value=0
             )
