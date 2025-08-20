@@ -1,5 +1,5 @@
 === Experiment Parameters ===
-exp CROPPED
+exp CROP6x
 lr 4.7e-3
 step 6
 gamma 0.808
@@ -15,21 +15,21 @@ wd 6.7e-5
 === Best Epoch Results per Experiment ===
 
 Experiment A:
-Balanced Accuracy: 0.8233045312889191
-Precision: 0.8413927796056594
-F1 Score: 0.8335264272710038
+Balanced Accuracy: 0.639692507874971
+Precision: 0.7078264414219946
+F1 Score: 0.6742802142929274
 
 Experiment B:
-Balanced Accuracy: 0.6767658383314317
-Precision: 0.6643037274445984
-F1 Score: 0.6532041713680049
+Balanced Accuracy: 0.8272009100338271
+Precision: 0.8292736395028695
+F1 Score: 0.81724548026474
 
 Experiment C:
-Balanced Accuracy: 0.8195628815379637
-Precision: 0.8512945058791842
-F1 Score: 0.8367771075837213
+Balanced Accuracy: 0.6948941778218506
+Precision: 0.7045096273667257
+F1 Score: 0.6782718346583392
 
 === Average Across Experiments ===
-Average Balanced Accuracy: 0.7732
-Average Precision: 0.7857
-Average F1 Score: 0.7745
+Average Balanced Accuracy: 0.7206
+Average Precision: 0.7472
+Average F1 Score: 0.7233

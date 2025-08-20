@@ -1,5 +1,5 @@
 === Experiment Parameters ===
-exp JITTER
+exp Erased6x
 lr 4.7e-3
 step 6
 gamma 0.808
@@ -15,21 +15,21 @@ wd 6.7e-5
 === Best Epoch Results per Experiment ===
 
 Experiment A:
-Balanced Accuracy: 0.8098471569186902
-Precision: 0.8205314713593856
-F1 Score: 0.8139991453301835
+Balanced Accuracy: 0.5687619983725056
+Precision: 0.5885443784813118
+F1 Score: 0.5612751475213361
 
 Experiment B:
-Balanced Accuracy: 0.6048675317867561
-Precision: 0.6673481804645774
-F1 Score: 0.6158910704579548
+Balanced Accuracy: 0.599367393999462
+Precision: 0.5976255308706286
+F1 Score: 0.5791284818722804
 
 Experiment C:
-Balanced Accuracy: 0.8749249157642913
-Precision: 0.8691946576730882
-F1 Score: 0.8671168080419654
+Balanced Accuracy: 0.5754853420844046
+Precision: 0.6517173941127631
+F1 Score: 0.609626224624625
 
 === Average Across Experiments ===
-Average Balanced Accuracy: 0.7632
-Average Precision: 0.7857
-Average F1 Score: 0.7657
+Average Balanced Accuracy: 0.5812
+Average Precision: 0.6126
+Average F1 Score: 0.5833
