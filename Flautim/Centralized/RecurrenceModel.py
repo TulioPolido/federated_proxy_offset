@@ -20,9 +20,11 @@ class RecurrenceModel(Model):
                 padding=1,
                 bias=False,
             )
-            self.base_model.classifier[1] = nn.Linear(
-                self.base_model.last_channel, num_classes
+            self.base_model.classifier = nn.Sequential(
+                nn.Dropout(p=0.5),
+                nn.Linear(self.base_model.last_channel, num_classes),
             )
+
         except Exception as e:
             fl.log(f"Error in RecurrenceModel __init__(): {e}")
 

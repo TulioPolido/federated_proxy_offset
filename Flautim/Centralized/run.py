@@ -8,39 +8,59 @@ import RecurrenceModel
 import CentRecurrenceDataset
 import CentRecurrenceExperiment
 
-
-LEARNING_RATE = 4.7e-3
-LEARNING_RATE_STEP = 6
-LEARNING_RATE_GAMMA = 0.808
+DATASET = "WISDM"
 NUM_EPOCHS = 100
-NUM_CLASSES = 7
 NUM_CHANNELS = 6
-WINDOW_SIZE = 1024
-STRIDE = 256
 BATCH_SIZE = 32
-WEIGHT_DECAY = 6.7e-5
-
 
 if __name__ == "__main__":
     try:
         context = fl.init()
         fl.log("Flautim initalized!")
 
-        # All available file indices
-        all_files = [1, 2, 3, 4, 5, 6, 7, 8]
-
         # Generate a random seed
         seed = random.randint(0, 2**32 - 1)
         random.seed(seed)
-        fl.log("Using random seed: {seed}")
+        fl.log(f"Using random seed: {seed}")
 
-        # Shuffle and split
-        test_files = random.sample(all_files, 2)
-        train_files = [f for f in all_files if f not in test_files]
+        # All available file indices
+        if DATASET == "PAMAP":
+            LEARNING_RATE = 4.7e-3
+            LEARNING_RATE_STEP = 6
+            LEARNING_RATE_GAMMA = 0.808
+            WEIGHT_DECAY = 6.7e-5
+            WINDOW_SIZE = 1024
+            STRIDE = 256
+            NUM_CLASSES = 7
 
-        def load_client_file(n: int):
-            path = f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{n}_rgb_withGyro.pt"
-            return torch.load(path)
+            all_files = [i for i in range(1, 9)]
+
+            # Shuffle and split
+            test_files = random.sample(all_files, 2)
+            train_files = [f for f in all_files if f not in test_files]
+
+            def load_client_file(n: int):
+                path = f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{n}_rgb_withGyro.pt"
+                return torch.load(path)
+
+        elif DATASET == "WISDM":
+            LEARNING_RATE = 6.9e-4
+            LEARNING_RATE_STEP = 13
+            LEARNING_RATE_GAMMA = 0.53
+            WEIGHT_DECAY = 1.1e-5
+            WINDOW_SIZE = 256
+            STRIDE = 64
+            NUM_CLASSES = 5
+
+            all_files = [i for i in range(1, 52)]
+
+            # Shuffle and split
+            test_files = random.sample(all_files, 10)
+            train_files = [f for f in all_files if f not in test_files]
+
+            def load_client_file(n: int):
+                path = f"./data/WISDM_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{n}_rgb_withGyro.pt"
+                return torch.load(path)
 
         # Load subsets
         train_dicts = [load_client_file(n) for n in train_files]
@@ -62,7 +82,7 @@ if __name__ == "__main__":
             train_data,
             test_data,
             batch_size=BATCH_SIZE,
-            augment_multiplier=3,
+            augment_multiplier=0,
             use_crop=False,
             use_erase=False,
             use_jitter=False,

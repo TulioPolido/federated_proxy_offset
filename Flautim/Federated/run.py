@@ -9,18 +9,13 @@ import flautim as fl
 import torch
 import random
 
-NUM_CLIENTS = 6
-NUM_CLASSES = 7
+
+DATASET = "PAMAP"
 NUM_CHANNELS = 6
-WINDOW_SIZE = 1024
-STRIDE = 256
-LEARNING_RATE = 4.7e-4
-LEARNING_RATE_STEP = 30
-LEARNING_RATE_GAMMA = 0.808
+NUM_CLIENTS = 6
 BATCH_SIZE = 32
 NUM_EPOCHS = 5
 NUM_ROUNDS = 150
-WEIGHT_DECAY = 6.7e-5
 
 
 def fit_config(server_round):
@@ -113,45 +108,88 @@ def evaluate_fn(context, test_data):
 if __name__ == "__main__":
     try:
         context = fl.init()
-
-        # All available file indices
-        all_clients = [1, 2, 3, 4, 5, 6, 7, 8]
-
         # Generate a random seed
         seed = random.randint(0, 2**32 - 1)
         random.seed(seed)
         fl.log(f"Using random seed: {seed}")
 
-        # Shuffle and split
-        train_clients = random.sample(all_clients, NUM_CLIENTS)
-        test_clients = [f for f in all_clients if f not in train_clients]
+        if DATASET == "PAMAP":
+            LEARNING_RATE = 4.7e-3
+            LEARNING_RATE_STEP = 6
+            LEARNING_RATE_GAMMA = 0.808
+            WEIGHT_DECAY = 6.7e-5
+            WINDOW_SIZE = 1024
+            STRIDE = 256
+            NUM_CLASSES = 7
+            # All available file indices
+            all_clients = [i for i in range(1, 9)]
 
-        fl.log(f"Train clients: {train_clients}")
-        fl.log(f"Test clients: {test_clients}")
+            # Shuffle and split
+            train_clients = random.sample(all_clients, NUM_CLIENTS)
+            test_clients = [f for f in all_clients if f not in train_clients]
 
-        # Load training client files
-        files = [
-            torch.load(
-                f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{client}_rgb_withGyro.pt"
-            )
-            for client in train_clients
-        ]
+            fl.log(f"Train clients: {train_clients}")
+            fl.log(f"Test clients: {test_clients}")
 
-        # Load and combine test files
-        test_files = [
-            torch.load(
-                f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{client}_rgb_withGyro.pt"
-            )
-            for client in test_clients
-        ]
+            # Load training client files
+            files = [
+                torch.load(
+                    f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{client}_rgb_withGyro.pt"
+                )
+                for client in train_clients
+            ]
+
+            # Load and combine test files
+            test_files = [
+                torch.load(
+                    f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{client}_rgb_withGyro.pt"
+                )
+                for client in test_clients
+            ]
+
+        elif DATASET == "WISDM":
+            LEARNING_RATE = 6.9e-4
+            LEARNING_RATE_STEP = 13
+            LEARNING_RATE_GAMMA = 0.53
+            WEIGHT_DECAY = 1.1e-5
+            WINDOW_SIZE = 256
+            STRIDE = 64
+            NUM_CLASSES = 5
+            # All available file indices
+            all_clients = [i for i in range(1, 52)]
+
+            # Shuffle and split
+            train_clients = random.sample(all_clients, NUM_CLIENTS)
+            test_clients = [f for f in all_clients if f not in train_clients]
+
+            fl.log(f"Train clients: {train_clients}")
+            fl.log(f"Test clients: {test_clients}")
+
+            # Load training client files
+            files = [
+                torch.load(
+                    f"./data/WISDM_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{client}_rgb_withGyro.pt"
+                )
+                for client in train_clients
+            ]
+
+            # Load and combine test files
+            test_files = [
+                torch.load(
+                    f"./data/WISDM_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{client}_rgb_withGyro.pt"
+                )
+                for client in test_clients
+            ]
 
         combined_test_data = {
             "data": torch.cat([f["data"] for f in test_files], dim=0),
             "labels": torch.cat([f["labels"] for f in test_files], dim=0),
         }
+
         client_fn_callback = generate_client_fn(context, files)
         evaluate_fn_callback = evaluate_fn(context, combined_test_data)
         server_fn_callback = generate_server_fn(context, eval_fn=evaluate_fn_callback)
+
         # Run federated learning
         run_federated(
             client_fn=client_fn_callback,
