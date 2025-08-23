@@ -8,7 +8,7 @@ import RecurrenceModel
 import CentRecurrenceDataset
 import CentRecurrenceExperiment
 
-DATASET = "WISDM"
+DATASET = "PAMAP"
 NUM_EPOCHS = 100
 NUM_CHANNELS = 6
 BATCH_SIZE = 32
