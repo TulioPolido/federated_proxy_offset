@@ -74,7 +74,9 @@ def generate_client_fn(context, files):
                 context,
                 lr=LEARNING_RATE,
                 epochs=NUM_EPOCHS,
-                weight_decay=WEIGHT_DECAY
+                weight_decay=WEIGHT_DECAY,
+                lr_step=LEARNING_RATE_STEP,
+                lr_gamma=LEARNING_RATE_GAMMA
             ).to_client()
         except Exception as e:
             print(f"Error in create_client_fn: {e}")
@@ -130,7 +132,9 @@ if __name__ == "__main__":
             WINDOW_SIZE = 1024
             STRIDE = 256
             LEARNING_RATE = 1e-4
-            WEIGHT_DECAY = 1e-4
+            LEARNING_RATE_STEP = 3
+            LEARNING_RATE_GAMMA = 0.5
+            WEIGHT_DECAY = 6.7e-5
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 

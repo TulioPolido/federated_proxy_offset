@@ -1,0 +1,35 @@
+=== Experiment Parameters ===
+exp Rotation3x label_smoothing 0.2
+lr 4.7e-3
+step 6
+gamma 0.808
+epochs 100
+cls 7
+ch 6
+win 1024
+stride 256
+bs 32
+wd 6.7e-5
+027
+
+=== Best Epoch Results per Experiment ===
+
+Experiment A:
+Balanced Accuracy: 0.8241817368185527
+Precision: 0.8286510122886374
+F1 Score: 0.8251521490883696
+
+Experiment B:
+Balanced Accuracy: 0.8511447093536646
+Precision: 0.8475269178524146
+F1 Score: 0.8379247749215154
+
+Experiment C:
+Balanced Accuracy: 0.7839123607451056
+Precision: 0.7694635901735908
+F1 Score: 0.7596663728921748
+
+=== Average Across Experiments ===
+Average Balanced Accuracy: 0.8197
+Average Precision: 0.8152
+Average F1 Score: 0.8076
