@@ -139,8 +139,10 @@ if __name__ == "__main__":
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
             # Shuffle and split
-            test_files = random.sample(all_files, TEST_USERS)
-            train_files = [f for f in all_files if f not in test_files]
+            # test_files = random.sample(all_files, TEST_USERS)
+            # train_files = [f for f in all_files if f not in test_files]
+            train_files = [1, 2, 3, 5, 6, 8]
+            test_files = [7, 4]
             fl.log(f"Train users: {train_files}")
             fl.log(f"Test users: {test_files}")
 
