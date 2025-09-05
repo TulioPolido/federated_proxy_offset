@@ -9,7 +9,7 @@ import flautim as fl
 import torch
 import random
 
-DATASET = "PAMAP"
+DATASET = "WISDM"
 NUM_CHANNELS = 6
 BATCH_SIZE = 32
 NUM_ROUNDS = 175
@@ -34,8 +34,8 @@ def generate_server_fn(context, eval_fn):
             strategy = flwr.server.strategy.FedAvg(
                 initial_parameters=params,
                 evaluate_metrics_aggregation_fn=weighted_average,
-                fraction_fit=1.0,
-                fraction_evaluate=1.0,
+                fraction_fit=0.2,
+                fraction_evaluate=0.2,
                 evaluate_fn=eval_fn,
                 on_fit_config_fn=fit_config,
                 on_evaluate_config_fn=fit_config
@@ -139,10 +139,8 @@ if __name__ == "__main__":
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
             # Shuffle and split
-            # test_files = random.sample(all_files, TEST_USERS)
-            # train_files = [f for f in all_files if f not in test_files]
-            train_files = [1, 2, 3, 5, 6, 8]
-            test_files = [7, 4]
+            test_files = random.sample(all_files, TEST_USERS)
+            train_files = [f for f in all_files if f not in test_files]
             fl.log(f"Train users: {train_files}")
             fl.log(f"Test users: {test_files}")
 
@@ -158,6 +156,43 @@ if __name__ == "__main__":
             test_files = [
                 torch.load(
                     f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
+                )
+                for i in test_files
+            ]
+
+        elif DATASET == "WISDM":
+            # Number of training clients
+            TOTAL_USERS = 51
+            NUM_CLIENTS = 41
+            TEST_USERS = TOTAL_USERS - NUM_CLIENTS
+            NUM_CLASSES = 5
+            WINDOW_SIZE = 256
+            STRIDE = 64
+            LEARNING_RATE = 6.9e-4
+            LEARNING_RATE_STEP = 13
+            LEARNING_RATE_GAMMA = 0.53
+            WEIGHT_DECAY = 1.1e-5
+
+            all_files = [i for i in range(1, TOTAL_USERS + 1)]
+
+            # Shuffle and split
+            test_files = random.sample(all_files, TEST_USERS)
+            train_files = [f for f in all_files if f not in test_files]
+            fl.log(f"Train users: {train_files}")
+            fl.log(f"Test users: {test_files}")
+
+            # Load training client files
+            files = [
+                torch.load(
+                    f"./data/WISDM_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
+                )
+                for i in train_files
+            ]
+
+            # Load and combine test files
+            test_files = [
+                torch.load(
+                    f"./data/WISDM_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
                 )
                 for i in test_files
             ]
