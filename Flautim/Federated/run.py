@@ -9,7 +9,7 @@ import flautim as fl
 import torch
 import random
 
-DATASET = "WISDM"
+DATASET = "PAMAP"
 NUM_CHANNELS = 6
 BATCH_SIZE = 32
 NUM_ROUNDS = 175
@@ -24,10 +24,7 @@ def generate_server_fn(context, eval_fn):
     def create_server_fn(context_flwr):
         try:
             net = RecurrenceModel.RecurrenceModel(
-                context,
-                num_classes=NUM_CLASSES,
-                num_channels=NUM_CHANNELS,
-                suffix=0
+                context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=0
             )
             params = ndarrays_to_parameters(net.get_parameters())
 
@@ -38,7 +35,7 @@ def generate_server_fn(context, eval_fn):
                 fraction_evaluate=0.2,
                 evaluate_fn=eval_fn,
                 on_fit_config_fn=fit_config,
-                on_evaluate_config_fn=fit_config
+                on_evaluate_config_fn=fit_config,
             )
 
             config = ServerConfig(num_rounds=NUM_ROUNDS)
@@ -55,10 +52,7 @@ def generate_client_fn(context, files):
             cid = int(context_flwr.node_config["partition-id"])
             file = files[cid]
             model = RecurrenceModel.RecurrenceModel(
-                context,
-                num_classes=NUM_CLASSES,
-                num_channels=NUM_CHANNELS,
-                suffix=cid
+                context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=cid
             )
             dataset = FedRecurrenceDataset.RecurrenceDataset(
                 file,
@@ -66,7 +60,7 @@ def generate_client_fn(context, files):
                 use_crop=False,
                 use_erase=False,
                 use_jitter=False,
-                use_rotation=True
+                use_rotation=True,
             )
             return FedRecurrenceExperiment.RecurrenceExperiment(
                 model,
@@ -76,7 +70,7 @@ def generate_client_fn(context, files):
                 epochs=NUM_EPOCHS,
                 weight_decay=WEIGHT_DECAY,
                 lr_step=LEARNING_RATE_STEP,
-                lr_gamma=LEARNING_RATE_GAMMA
+                lr_gamma=LEARNING_RATE_GAMMA,
             ).to_client()
         except Exception as e:
             print(f"Error in create_client_fn: {e}")
@@ -88,15 +82,11 @@ def evaluate_fn(context, test_data):
     def fn(server_round, parameters, config):
         try:
             model = RecurrenceModel.RecurrenceModel(
-                context,
-                num_classes=NUM_CLASSES,
-                num_channels=NUM_CHANNELS
+                context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS
             )
             model.set_parameters(parameters)
             dataset = FedRecurrenceDataset.RecurrenceDataset(
-                test_data,
-                batch_size=BATCH_SIZE,
-                shuffle=False
+                test_data, batch_size=BATCH_SIZE, shuffle=False
             )
             experiment = FedRecurrenceExperiment.RecurrenceExperiment(
                 model,
@@ -104,7 +94,7 @@ def evaluate_fn(context, test_data):
                 context,
                 lr=LEARNING_RATE,
                 epochs=NUM_EPOCHS,
-                weight_decay=WEIGHT_DECAY
+                weight_decay=WEIGHT_DECAY,
             )
 
             config["server_round"] = server_round
@@ -112,6 +102,7 @@ def evaluate_fn(context, test_data):
             return loss, return_dic
         except Exception as e:
             print(f"Error in evaluate_fn: {e}")
+
     return fn
 
 
@@ -126,7 +117,7 @@ if __name__ == "__main__":
         if DATASET == "PAMAP":
             # Number of training clients
             TOTAL_USERS = 8
-            NUM_CLIENTS = 6
+            NUM_CLIENTS = 7
             TEST_USERS = TOTAL_USERS - NUM_CLIENTS
             NUM_CLASSES = 7
             WINDOW_SIZE = 1024
@@ -139,8 +130,10 @@ if __name__ == "__main__":
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
             # Shuffle and split
-            test_files = random.sample(all_files, TEST_USERS)
-            train_files = [f for f in all_files if f not in test_files]
+            train_files = [1, 2, 3, 5, 6, 7, 8]
+            test_files = [4]
+            # test_files = random.sample(all_files, TEST_USERS)
+            # train_files = [f for f in all_files if f not in test_files]
             fl.log(f"Train users: {train_files}")
             fl.log(f"Test users: {test_files}")
 
@@ -198,8 +191,8 @@ if __name__ == "__main__":
             ]
 
         combined_test_data = {
-            'data': torch.cat([f['data'] for f in test_files], dim=0),
-            'labels': torch.cat([f['labels'] for f in test_files], dim=0),
+            "data": torch.cat([f["data"] for f in test_files], dim=0),
+            "labels": torch.cat([f["labels"] for f in test_files], dim=0),
         }
 
         client_fn_callback = generate_client_fn(context, files)
@@ -211,7 +204,7 @@ if __name__ == "__main__":
             client_fn=client_fn_callback,
             server_fn=server_fn_callback,
             num_clients=NUM_CLIENTS,
-            num_rounds=NUM_ROUNDS
+            num_rounds=NUM_ROUNDS,
         )
     except Exception as e:
         fl.log(f"Error in run.py: {e}")
