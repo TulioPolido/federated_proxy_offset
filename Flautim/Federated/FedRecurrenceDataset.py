@@ -16,6 +16,7 @@ class RecurrenceDataset(Dataset):
             use_erase=False,
             use_jitter=False,
             use_rotation=False,
+            test_percentage=0,
             **kwargs):
         try:
             super(RecurrenceDataset, self)\
@@ -30,8 +31,7 @@ class RecurrenceDataset(Dataset):
             self.batch_size = kwargs.get('batch_size', 32)
             self.shuffle = kwargs.get('shuffle', True)
             self.num_workers = kwargs.get('num_workers', 1)
-
-            self.test_size = int(0.2 * len(self.data))
+            self.test_size = int(test_percentage * len(self.labels))
 
             # Augmentation options
             self.augment_multiplier = augment_multiplier
@@ -110,20 +110,30 @@ class RecurrenceDataset(Dataset):
     def train(self):
         try:
             train = copy.deepcopy(self)
-            train.data = self.data[:-self.test_size]
-            train.labels = self.labels[:-self.test_size]
-            return copy.deepcopy(train)
+            if self.test_size > 0:
+                train.data = self.data[:-self.test_size]
+                train.labels = self.labels[:-self.test_size]
+            else:
+                train.data = self.data
+                train.labels = self.labels
+            return train
         except Exception as e:
             fl.log(f"Error in RecurrenceDataset train(): {e}")
+
 
     def validation(self):
         try:
             val = copy.deepcopy(self)
-            val.data = self.data[-self.test_size:]
-            val.labels = self.labels[-self.test_size:]
-            return copy.deepcopy(val)
+            if self.test_size > 0:
+                val.data = self.data[-self.test_size:]
+                val.labels = self.labels[-self.test_size:]
+            else:
+                val.data = []
+                val.labels = []
+            return val
         except Exception as e:
             fl.log(f"Error in RecurrenceDataset validation(): {e}")
+
 
     def __len__(self):
         try:

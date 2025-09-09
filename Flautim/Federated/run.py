@@ -31,8 +31,8 @@ def generate_server_fn(context, eval_fn):
             strategy = flwr.server.strategy.FedAvg(
                 initial_parameters=params,
                 evaluate_metrics_aggregation_fn=weighted_average,
-                fraction_fit=0.2,
-                fraction_evaluate=0.2,
+                fraction_fit=0.5,
+                fraction_evaluate=1.0,
                 evaluate_fn=eval_fn,
                 on_fit_config_fn=fit_config,
                 on_evaluate_config_fn=fit_config,
@@ -51,17 +51,21 @@ def generate_client_fn(context, files):
         try:
             cid = int(context_flwr.node_config["partition-id"])
             file = files[cid]
+
             model = RecurrenceModel.RecurrenceModel(
                 context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=cid
             )
+
             dataset = FedRecurrenceDataset.RecurrenceDataset(
                 file,
-                augment_multiplier=0,
+                augment_multiplier=2,
                 use_crop=False,
                 use_erase=False,
                 use_jitter=False,
                 use_rotation=True,
+                test_percentage=0.05
             )
+
             return FedRecurrenceExperiment.RecurrenceExperiment(
                 model,
                 dataset,
@@ -86,7 +90,10 @@ def evaluate_fn(context, test_data):
             )
             model.set_parameters(parameters)
             dataset = FedRecurrenceDataset.RecurrenceDataset(
-                test_data, batch_size=BATCH_SIZE, shuffle=False
+                test_data, 
+                batch_size=BATCH_SIZE, 
+                shuffle=False, 
+                test_percentage=1
             )
             experiment = FedRecurrenceExperiment.RecurrenceExperiment(
                 model,
@@ -130,8 +137,8 @@ if __name__ == "__main__":
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
             # Shuffle and split
-            train_files = [1, 2, 3, 5, 6, 7, 8]
             test_files = [4]
+            train_files = [i for i in all_files if i not in test_files]
             # test_files = random.sample(all_files, TEST_USERS)
             # train_files = [f for f in all_files if f not in test_files]
             fl.log(f"Train users: {train_files}")
