@@ -1,5 +1,5 @@
 === Experiment Parameters ===
-exp
+exp TEST USER 2
 lr 1e-4
 step 3
 gamma 0.5
@@ -16,21 +16,21 @@ wd 6.7e-5
 === Best Epoch Results per Experiment ===
 
 Experiment A:
-Balanced Accuracy: 0.5
-Precision: 0.5357142857142857
-F1 Score: 0.6122448979591836
+Balanced Accuracy: 0.7443085292605954
+Precision: 0.750322448042891
+F1 Score: 0.7287706558653151
 
 Experiment B:
-Balanced Accuracy: 0.5
-Precision: 0.6593406593406593
-F1 Score: 0.6857142857142856
+Balanced Accuracy: 0.7803463093038469
+Precision: 0.7799820828351812
+F1 Score: 0.7726166990681592
 
 Experiment C:
-Balanced Accuracy: 0.4916666666666666
-Precision: 0.5202821869488536
-F1 Score: 0.5977710233029382
+Balanced Accuracy: 0.7109582037141189
+Precision: 0.7252156925200404
+F1 Score: 0.6861952182143233
 
 === Average Across Experiments ===
-Average Balanced Accuracy: 0.4972
-Average Precision: 0.5718
-Average F1 Score: 0.6319
+Average Balanced Accuracy: 0.7452
+Average Precision: 0.7518
+Average F1 Score: 0.7292

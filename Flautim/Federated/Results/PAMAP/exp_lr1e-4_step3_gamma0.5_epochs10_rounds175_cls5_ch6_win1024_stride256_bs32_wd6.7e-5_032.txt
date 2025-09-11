@@ -1,5 +1,5 @@
 === Experiment Parameters ===
-exp noAugmentation noSmoothing
+exp TEST USER 5
 lr 1e-4
 step 3
 gamma 0.5
@@ -7,30 +7,30 @@ epochs 10
 rounds 175
 cls 5
 ch 6
-win 256
-stride 64
+win 1024
+stride 256
 bs 32
-wd 1e-4
-027
+wd 6.7e-5
+032
 
 === Best Epoch Results per Experiment ===
 
 Experiment A:
-Balanced Accuracy: 0.6768617021276596
-Precision: 0.464460660112834
-F1 Score: 0.537963710452466
+Balanced Accuracy: 0.7243940426527887
+Precision: 0.7298503039666443
+F1 Score: 0.7020772020110434
 
 Experiment B:
-Balanced Accuracy: 0.7853383458646617
-Precision: 0.8944624421774958
-F1 Score: 0.8650867831733754
+Balanced Accuracy: 0.6782278761574955
+Precision: 0.6801399411676685
+F1 Score: 0.6691166382363548
 
 Experiment C:
-Balanced Accuracy: 0.9210895678286982
-Precision: 0.9649145932882957
-F1 Score: 0.9375066497698602
+Balanced Accuracy: 0.7088819610409166
+Precision: 0.6923012254797255
+F1 Score: 0.6916076788943056
 
 === Average Across Experiments ===
-Average Balanced Accuracy: 0.7944
-Average Precision: 0.7746
-Average F1 Score: 0.7802
+Average Balanced Accuracy: 0.7038
+Average Precision: 0.7008
+Average F1 Score: 0.6876

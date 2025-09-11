@@ -137,7 +137,7 @@ if __name__ == "__main__":
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
             # Shuffle and split
-            test_files = [4]
+            test_files = [8]
             train_files = [i for i in all_files if i not in test_files]
             # test_files = random.sample(all_files, TEST_USERS)
             # train_files = [f for f in all_files if f not in test_files]
