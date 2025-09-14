@@ -123,6 +123,8 @@ class RecurrenceDataset(Dataset):
 
     def validation(self):
         try:
+            #TODO: retornar train_loader e test_loader
+            # O teste é feito no servidor, como ajustar isso já que ele não tem train_loader?
             val = copy.deepcopy(self)
             if self.test_size > 0:
                 val.data = self.data[-self.test_size:]
