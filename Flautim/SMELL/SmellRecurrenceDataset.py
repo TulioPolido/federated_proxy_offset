@@ -17,7 +17,7 @@ class RecurrenceDataset(Dataset):
             use_erase=False,
             use_jitter=False,
             use_rotation=False,
-            test_percentage=0,
+            test_percentage=0.0,
             **kwargs):
         try:
             super(RecurrenceDataset, self)\
