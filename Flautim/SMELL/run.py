@@ -86,29 +86,33 @@ def generate_client_fn(context, files, test_file):
 def evaluate_fn(context, test_data):
      def fn(server_round, parameters, config):
          try:
-             model = SmellRecurrenceModel.RecurrenceModel(
-                 context, emb_dim=EMB_DIM, num_channels=NUM_CHANNELS
-             )
-             model.set_parameters(parameters)
-             dataset = SmellRecurrenceDataset.RecurrenceDataset(
-                 test_data,
-                 batch_size=BATCH_SIZE,
-                 shuffle=False,
-                 test_percentage=1
-             )
-             experiment = SmellRecurrenceExperiment.RecurrenceExperiment(
-                 model,
-                 dataset,
-                 context,
-                 lr=LEARNING_RATE,
-                 epochs=NUM_EPOCHS,
-                 weight_decay=WEIGHT_DECAY,
-             )
+            model = SmellRecurrenceModel.RecurrenceModel(
+                context, emb_dim=EMB_DIM, num_channels=NUM_CHANNELS
+            )
+            model.set_parameters(parameters)
+            dataset = SmellRecurrenceDataset.RecurrenceDataset(
+                test_data,
+                batch_size=BATCH_SIZE,
+                shuffle=False,
+                test_percentage=1
+            )
+            experiment = SmellRecurrenceExperiment.RecurrenceExperiment(
+                model,
+                dataset,
+                context,
+                lr=LEARNING_RATE,
+                epochs=NUM_EPOCHS,
+                weight_decay=WEIGHT_DECAY,
+            )
 
+            fl.log("Before evaluate")
 
-             config["server_round"] = server_round
-             loss, _, return_dic = experiment.evaluate(parameters, config)
-             return loss, return_dic
+            config["server_round"] = server_round
+            loss, _, return_dic = experiment.evaluate(parameters, config)
+            fl.log(f"After evaluate: {loss}")
+            fl.log(f"After evaluate: {return_dic}")
+            
+            return loss, return_dic
          except Exception as e:
              print(f"Error in evaluate_fn: {e}")
 
