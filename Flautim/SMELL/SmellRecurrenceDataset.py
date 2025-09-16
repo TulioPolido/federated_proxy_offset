@@ -17,7 +17,6 @@ class RecurrenceDataset(Dataset):
             use_erase=False,
             use_jitter=False,
             use_rotation=False,
-            test_percentage=0.0,
             **kwargs):
         try:
             super(RecurrenceDataset, self)\
@@ -39,7 +38,6 @@ class RecurrenceDataset(Dataset):
             self.batch_size = kwargs.get('batch_size', 32)
             self.shuffle = kwargs.get('shuffle', True)
             self.num_workers = kwargs.get('num_workers', 1)
-            self.test_size = int(test_percentage * len(self.labels))
 
             # Augmentation options
             self.augment_multiplier = augment_multiplier

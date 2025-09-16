@@ -64,7 +64,6 @@ def generate_client_fn(context, files, test_file):
                 use_erase=False,
                 use_jitter=False,
                 use_rotation=True,
-                test_percentage=0.05
             )
 
             return SmellRecurrenceExperiment.RecurrenceExperiment(
@@ -94,7 +93,6 @@ def evaluate_fn(context, test_data):
                 test_data,
                 batch_size=BATCH_SIZE,
                 shuffle=False,
-                test_percentage=1
             )
             experiment = SmellRecurrenceExperiment.RecurrenceExperiment(
                 model,
@@ -210,7 +208,7 @@ if __name__ == "__main__":
 
         client_fn_callback = generate_client_fn(context, files, combined_test_data)
         evaluate_fn_callback = evaluate_fn(context, combined_test_data)
-        server_fn_callback = generate_server_fn(context, eval_fn=evaluate_fn_callback) 
+        server_fn_callback = generate_server_fn(context, eval_fn=None) 
 
         # Run federated learning
         run_federated(
