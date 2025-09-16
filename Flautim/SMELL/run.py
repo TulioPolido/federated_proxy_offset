@@ -80,7 +80,7 @@ def generate_client_fn(context, files, test_file):
         except Exception as e:
             fl.log(f"Error in create_clientfn: {e}")
         
-        return create_client_fn
+    return create_client_fn
 
 
 def evaluate_fn(context, test_data):
