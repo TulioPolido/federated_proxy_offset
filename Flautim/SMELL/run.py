@@ -48,7 +48,7 @@ def generate_server_fn(context, eval_fn=None):
 
 def generate_client_fn(context, files, test_file):
     def create_client_fn(context_flwr):
-      
+        try:
             cid = int(context_flwr.node_config["partition-id"])
             file = files[cid]
 
@@ -77,9 +77,10 @@ def generate_client_fn(context, files, test_file):
                 lr_gamma=LEARNING_RATE_GAMMA,
                 embedding_size=EMB_DIM
             ).to_client()
-
-
-    return create_client_fn
+        except Exception as e:
+            fl.log(f"Error in create_clientfn: {e}")
+        
+        return create_client_fn
 
 
 def evaluate_fn(context, test_data):
