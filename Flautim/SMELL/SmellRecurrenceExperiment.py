@@ -200,49 +200,46 @@ class RecurrenceExperiment(Experiment):
             margin=1.0,
             **kwargs
             ):
-        try:
-            fl.log("Creating Experiment")
-            super(RecurrenceExperiment, self)\
-                .__init__(model, dataset, context, **kwargs)
-            # self.epochs = epochs
-            # self.num_classes = num_classes
-            # self.margin = margin
-            # self.embedding_size = embedding_size
-            # self.lr = lr
-            # self.pre_train_lr = pre_train_lr
-            # self.lr_step = lr_step
-            # self.lr_gamma = lr_gamma
-            # self.weight_decay = weight_decay
+        fl.log("Creating Experiment")
+        super(RecurrenceExperiment, self)\
+            .__init__(model, dataset, context, **kwargs)
+        self.epochs = epochs
+        self.num_classes = num_classes
+        self.margin = margin
+        self.embedding_size = embedding_size
+        self.lr = lr
+        self.pre_train_lr = pre_train_lr
+        self.lr_step = lr_step
+        self.lr_gamma = lr_gamma
+        self.weight_decay = weight_decay
 
-            # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            # self.model.to(self.device)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model.to(self.device)
 
-            # self.criterion = LearnablePrototypicalLossWithDiversityRegularization(
-            #     embedding_dim=self.embedding_size,
-            #     num_similar_prototypes=2,
-            #     num_dissimilar_prototypes=2
-            # ).to(self.device)
-            # self.optimizer1 = torch.optim.Adam(
-            #     list(self.criterion.parameters()),
-            #     lr=self.lr
-            # )
-            # self.optimizer2 = torch.torch.optim.SGD(
-            #     [{'params': self.model.parameters(), 'lr': self.lr}]
-            #     + [{'params': self.criterion.parameters(), 'lr': self.lr}]
-            # )
-            # self.pre_criterion = PrototypicalCenterLoss(
-            #     num_classes=self.num_classes,
-            #     embedding_size=self.embedding_size,
-            #     margin=self.margin
-            # )
-            # self.pre_optimizer = torch.optim.Adam(
-            #     list(model.parameters()) + list(self.pre_criterion.parameters()),
-            #     lr=self.pre_train_lr
-            # )
+        self.criterion = LearnablePrototypicalLossWithDiversityRegularization(
+            embedding_dim=self.embedding_size,
+            num_similar_prototypes=2,
+            num_dissimilar_prototypes=2
+        ).to(self.device)
+        self.optimizer1 = torch.optim.Adam(
+            list(self.criterion.parameters()),
+            lr=self.lr
+        )
+        self.optimizer2 = torch.torch.optim.SGD(
+            [{'params': self.model.parameters(), 'lr': self.lr}]
+            + [{'params': self.criterion.parameters(), 'lr': self.lr}]
+        )
+        self.pre_criterion = PrototypicalCenterLoss(
+            num_classes=self.num_classes,
+            embedding_size=self.embedding_size,
+            margin=self.margin
+        )
+        self.pre_optimizer = torch.optim.Adam(
+            list(model.parameters()) + list(self.pre_criterion.parameters()),
+            lr=self.pre_train_lr
+        )
 
-            # self.scheduler = StepLR(self.optimizer1, step_size=lr_step, gamma=lr_gamma)
-        except Exception as e:
-            fl.log(f"Error in RecurrenceExperiment __init__: {e}")
+        self.scheduler = StepLR(self.optimizer1, step_size=lr_step, gamma=lr_gamma)
 
 ################################
 # TRAINING FUNCTIONS ######

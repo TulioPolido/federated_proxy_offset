@@ -48,38 +48,37 @@ def generate_server_fn(context, eval_fn=None):
 
 def generate_client_fn(context, files, test_file):
     def create_client_fn(context_flwr):
-        try:
-            cid = int(context_flwr.node_config["partition-id"])
-            file = files[cid]
+      
+        cid = int(context_flwr.node_config["partition-id"])
+        file = files[cid]
 
-            model = SmellRecurrenceModel.RecurrenceModel(
-                context, emb_dim=EMB_DIM, num_channels=NUM_CHANNELS, suffix=cid
-            )
+        model = SmellRecurrenceModel.RecurrenceModel(
+            context, emb_dim=EMB_DIM, num_channels=NUM_CHANNELS, suffix=cid
+        )
 
-            dataset = SmellRecurrenceDataset.RecurrenceDataset(
-                train_file=file,
-                test_file=test_file,
-                augment_multiplier=2,
-                use_crop=False,
-                use_erase=False,
-                use_jitter=False,
-                use_rotation=True,
-            )
+        dataset = SmellRecurrenceDataset.RecurrenceDataset(
+            train_file=file,
+            test_file=test_file,
+            augment_multiplier=2,
+            use_crop=False,
+            use_erase=False,
+            use_jitter=False,
+            use_rotation=True,
+        )
 
-            return SmellRecurrenceExperiment.RecurrenceExperiment(
-                model,
-                dataset,
-                context,
-                lr=LEARNING_RATE,
-                epochs=NUM_EPOCHS,
-                weight_decay=WEIGHT_DECAY,
-                lr_step=LEARNING_RATE_STEP,
-                lr_gamma=LEARNING_RATE_GAMMA,
-                embedding_size=EMB_DIM
-            ).to_client()
-        except Exception as e:
-            fl.log(f"Error in create_clientfn: {e}")
-        
+        return SmellRecurrenceExperiment.RecurrenceExperiment(
+            model,
+            dataset,
+            context,
+            lr=LEARNING_RATE,
+            epochs=NUM_EPOCHS,
+            weight_decay=WEIGHT_DECAY,
+            lr_step=LEARNING_RATE_STEP,
+            lr_gamma=LEARNING_RATE_GAMMA,
+            embedding_size=EMB_DIM
+        ).to_client()
+
+
     return create_client_fn
 
 
