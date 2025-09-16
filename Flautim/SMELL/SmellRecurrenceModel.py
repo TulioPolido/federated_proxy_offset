@@ -7,7 +7,7 @@ class RecurrenceModel(Model):
     def __init__(self, context, emb_dim, num_channels=6, **kwargs):
         super(RecurrenceModel, self)\
             .__init__(context, name="RecurrenceNet", **kwargs)
-        
+
         self.emb_dim = emb_dim
 
         self.base_model = models.mobilenet_v2(weights='DEFAULT')
@@ -20,9 +20,11 @@ class RecurrenceModel(Model):
             bias=False
         )
 
-        # instead of 10-class output, project to emb_dim
+        # get the feature dimension from the existing classifier
+        in_features = self.base_model.classifier[1].in_features
+
         self.base_model.classifier[1] = nn.Sequential(
-            nn.Linear(84, self.emb_dim),
+            nn.Linear(in_features, self.emb_dim),
             nn.ReLU()
         )
 

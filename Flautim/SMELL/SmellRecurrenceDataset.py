@@ -10,7 +10,8 @@ import random
 class RecurrenceDataset(Dataset):
     def __init__(
             self,
-            file,
+            train_file,
+            test_file=None,
             augment_multiplier=0,
             use_crop=False,
             use_erase=False,
@@ -21,10 +22,17 @@ class RecurrenceDataset(Dataset):
         try:
             super(RecurrenceDataset, self)\
                 .__init__(name="RecurrenceDataset", **kwargs)
+            # Train set
+            self.data = train_file['data'].float().permute(0, 3, 1, 2)
+            self.labels = train_file['labels'].long()
 
-            self.data = file['data'].float()\
-                .permute(0, 3, 1, 2)  # Shape: (N, C, H, W)
-            self.labels = file['labels'].long()
+            # Optional test set
+            if test_file is not None:
+                self.test_data = test_file['data'].float().permute(0, 3, 1, 2)
+                self.test_labels = test_file['labels'].long()
+            else:
+                self.test_data = None
+                self.test_labels = None
 
             self.xdtype = torch.float32
             self.ydtype = torch.int64
@@ -71,21 +79,19 @@ class RecurrenceDataset(Dataset):
 
     def dataloader(self, validation=False):
         try:
-            if validation:
-                dataset = self.validation()
-            else:
-                # Start with original training data
-                dataset = self.train()
+            if not validation:
+                train_set = self.train()
 
+                # Apply augmentation only on training set
                 if self.augment_multiplier > 0:
                     augmented_data = []
                     augmented_labels = []
 
-                    for i in range(len(dataset.data)):
-                        img = dataset.data[i]
-                        label = dataset.labels[i]
+                    for i in range(len(train_set.data)):
+                        img = train_set.data[i]
+                        label = train_set.labels[i]
 
-                        # always keep original
+                        # keep original
                         augmented_data.append(img.clone())
                         augmented_labels.append(label.clone())
 
@@ -95,47 +101,45 @@ class RecurrenceDataset(Dataset):
                             augmented_data.append(aug_img)
                             augmented_labels.append(label.clone())
 
-                    dataset.data = torch.stack(augmented_data)
-                    dataset.labels = torch.stack(augmented_labels)
+                    train_set.data = torch.stack(augmented_data)
+                    train_set.labels = torch.stack(augmented_labels)
 
-            return DataLoader(
-                dataset,
-                batch_size=self.batch_size,
-                shuffle=not validation,
-                num_workers=self.num_workers,
-            )
+                return [DataLoader(train_set, batch_size=self.batch_size,
+                        shuffle=True, num_workers=self.num_workers), None]
+
+            else:
+                train_set = self.train()
+                test_set = self.test()
+
+                train_loader = DataLoader(train_set, batch_size=self.batch_size,
+                                          shuffle=True, num_workers=self.num_workers)
+                test_loader = DataLoader(test_set, batch_size=self.batch_size,
+                                         shuffle=False, num_workers=self.num_workers)
+                return [train_loader, test_loader]
         except Exception as e:
             fl.log(f"Error in RecurrenceDataset dataloader(): {e}")
 
     def train(self):
         try:
             train = copy.deepcopy(self)
-            if self.test_size > 0:
-                train.data = self.data[:-self.test_size]
-                train.labels = self.labels[:-self.test_size]
-            else:
-                train.data = self.data
-                train.labels = self.labels
+            train.data = self.data
+            train.labels = self.labels
+            train.test_data = self.test_data
+            train.test_labels = self.test_labels
             return train
         except Exception as e:
             fl.log(f"Error in RecurrenceDataset train(): {e}")
 
-
     def validation(self):
         try:
-            #TODO: retornar train_loader e test_loader
-            # O teste é feito no servidor, como ajustar isso já que ele não tem train_loader?
             val = copy.deepcopy(self)
-            if self.test_size > 0:
-                val.data = self.data[-self.test_size:]
-                val.labels = self.labels[-self.test_size:]
-            else:
-                val.data = []
-                val.labels = []
+            val.data = self.data
+            val.labels = self.labels
+            val.test_data = self.test_data
+            val.test_labels = self.test_labels
             return val
         except Exception as e:
             fl.log(f"Error in RecurrenceDataset validation(): {e}")
-
 
     def __len__(self):
         try:

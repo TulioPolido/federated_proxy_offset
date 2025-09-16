@@ -14,17 +14,18 @@ NUM_CHANNELS = 6
 BATCH_SIZE = 32
 NUM_ROUNDS = 175
 NUM_EPOCHS = 10
+EMB_DIM = 64
 
 
 def fit_config(server_round):
     return {"server_round": server_round}
 
 
-def generate_server_fn(context, eval_fn):
+def generate_server_fn(context, eval_fn=None):
     def create_server_fn(context_flwr):
         try:
             net = SmellRecurrenceModel.RecurrenceModel(
-                context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=0
+                context, emb_dim=EMB_DIM, num_channels=NUM_CHANNELS, suffix=0
             )
             params = ndarrays_to_parameters(net.get_parameters())
 
@@ -46,18 +47,19 @@ def generate_server_fn(context, eval_fn):
     return create_server_fn
 
 
-def generate_client_fn(context, files):
+def generate_client_fn(context, files, test_file):
     def create_client_fn(context_flwr):
         try:
             cid = int(context_flwr.node_config["partition-id"])
             file = files[cid]
 
             model = SmellRecurrenceModel.RecurrenceModel(
-                context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=cid
+                context, emb_dim=EMB_DIM, num_channels=NUM_CHANNELS, suffix=cid
             )
 
             dataset = SmellRecurrenceDataset.RecurrenceDataset(
-                file,
+                train_file=file,
+                test_file=test_file,
                 augment_multiplier=2,
                 use_crop=False,
                 use_erase=False,
@@ -75,6 +77,7 @@ def generate_client_fn(context, files):
                 weight_decay=WEIGHT_DECAY,
                 lr_step=LEARNING_RATE_STEP,
                 lr_gamma=LEARNING_RATE_GAMMA,
+                embedding_size=EMB_DIM
             ).to_client()
         except Exception as e:
             print(f"Error in create_client_fn: {e}")
@@ -82,35 +85,35 @@ def generate_client_fn(context, files):
     return create_client_fn
 
 
-def evaluate_fn(context, test_data):
-    def fn(server_round, parameters, config):
-        try:
-            model = SmellRecurrenceModel.RecurrenceModel(
-                context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS
-            )
-            model.set_parameters(parameters)
-            dataset = SmellRecurrenceDataset.RecurrenceDataset(
-                test_data, 
-                batch_size=BATCH_SIZE, 
-                shuffle=False, 
-                test_percentage=1
-            )
-            experiment = SmellRecurrenceExperiment.RecurrenceExperiment(
-                model,
-                dataset,
-                context,
-                lr=LEARNING_RATE,
-                epochs=NUM_EPOCHS,
-                weight_decay=WEIGHT_DECAY,
-            )
+# def evaluate_fn(context, test_data):
+#     def fn(server_round, parameters, config):
+#         try:
+#             model = SmellRecurrenceModel.RecurrenceModel(
+#                 context, emb_dim=EMB_DIM, num_channels=NUM_CHANNELS
+#             )
+#             model.set_parameters(parameters)
+#             dataset = SmellRecurrenceDataset.RecurrenceDataset(
+#                 test_data,
+#                 batch_size=BATCH_SIZE,
+#                 shuffle=False,
+#                 test_percentage=1
+#             )
+#             experiment = SmellRecurrenceExperiment.RecurrenceExperiment(
+#                 model,
+#                 dataset,
+#                 context,
+#                 lr=LEARNING_RATE,
+#                 epochs=NUM_EPOCHS,
+#                 weight_decay=WEIGHT_DECAY,
+#             )
 
-            config["server_round"] = server_round
-            loss, _, return_dic = experiment.evaluate(parameters, config)
-            return loss, return_dic
-        except Exception as e:
-            print(f"Error in evaluate_fn: {e}")
+#             config["server_round"] = server_round
+#             loss, _, return_dic = experiment.evaluate(parameters, config)
+#             return loss, return_dic
+#         except Exception as e:
+#             print(f"Error in evaluate_fn: {e}")
 
-    return fn
+#     return fn
 
 
 if __name__ == "__main__":
@@ -137,7 +140,7 @@ if __name__ == "__main__":
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
             # Shuffle and split
-            test_files = [8]
+            test_files = [7]
             train_files = [i for i in all_files if i not in test_files]
             # test_files = random.sample(all_files, TEST_USERS)
             # train_files = [f for f in all_files if f not in test_files]
@@ -202,9 +205,9 @@ if __name__ == "__main__":
             "labels": torch.cat([f["labels"] for f in test_files], dim=0),
         }
 
-        client_fn_callback = generate_client_fn(context, files)
-        evaluate_fn_callback = evaluate_fn(context, combined_test_data)
-        server_fn_callback = generate_server_fn(context, eval_fn=evaluate_fn_callback)
+        client_fn_callback = generate_client_fn(context, files, combined_test_data)
+        # evaluate_fn_callback = evaluate_fn(context, combined_test_data)
+        server_fn_callback = generate_server_fn(context, eval_fn=None)  # No server evaluation
 
         # Run federated learning
         run_federated(
