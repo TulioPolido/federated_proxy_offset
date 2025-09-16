@@ -506,7 +506,7 @@ class RecurrenceExperiment(Experiment):
         try:
             fl.log("Starting validation")
             train_loader, test_loader = data_loaders
-            fl.log(f"Reading data_loaders: {type(train_loader) | {type(test_loader)}}")
+            fl.log(f"Reading data_loaders: {type(train_loader)} | {type(test_loader)}")
             loss_avg, acc, prec, rec, f1, conf_matrix = self.test(train_loader, test_loader)
             fl.log("After test")
             return loss_avg, {
