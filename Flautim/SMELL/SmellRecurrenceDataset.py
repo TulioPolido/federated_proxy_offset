@@ -109,7 +109,7 @@ class RecurrenceDataset(Dataset):
 
             else:
                 train_set = self.train()
-                test_set = self.test()
+                test_set = self.validation()
 
                 train_loader = DataLoader(train_set, batch_size=self.batch_size,
                                           shuffle=True, num_workers=self.num_workers)

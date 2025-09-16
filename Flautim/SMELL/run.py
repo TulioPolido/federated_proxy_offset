@@ -206,7 +206,7 @@ if __name__ == "__main__":
 
         client_fn_callback = generate_client_fn(context, files, combined_test_data)
         evaluate_fn_callback = evaluate_fn(context, combined_test_data)
-        server_fn_callback = generate_server_fn(context, eval_fn=evaluate_fn_callback)  # No server evaluation
+        server_fn_callback = generate_server_fn(context, eval_fn=evaluate_fn_callback) 
 
         # Run federated learning
         run_federated(
