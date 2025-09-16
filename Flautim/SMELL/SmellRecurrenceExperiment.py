@@ -382,7 +382,6 @@ class RecurrenceExperiment(Experiment):
 
     def training_loop(self, data_loaders):
         try:
-            fl.log("TRAINING LOOP")
             train_loader, _ = data_loaders
             self.pretrain_model_prototypical_center(train_loader, 2)
             loss_avg1 = self.train_model_with_dynamic_lr(train_loader, self.optimizer1, self.epochs)
@@ -505,11 +504,8 @@ class RecurrenceExperiment(Experiment):
 
     def validation_loop(self, data_loaders):
         try:
-            fl.log("VALIDATION LOOP")
             train_loader, test_loader = data_loaders
-            fl.log(f"Types: {train_loader} {test_loader}")
             loss_avg, acc, prec, rec, f1, conf_matrix = self.test(train_loader, test_loader)
-            fl.log(f"Validation loss: {loss_avg}")
             return loss_avg, {
                 "TEST_ACC": acc,
                 "TEST_PREC": prec,
