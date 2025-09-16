@@ -328,6 +328,7 @@ class RecurrenceExperiment(Experiment):
             return X1, X2, labels
         except Exception as e:
             fl.log(f"Error in generate_pairs(): {e}")
+            return torch.tensor([]), torch.tensor([]), torch.tensor([])
 
     # Training loop with dynamic learning rate adjustment
     def train_model_with_dynamic_lr(self, train_loader, optimizer, num_epochs, frozen=False):
@@ -378,6 +379,7 @@ class RecurrenceExperiment(Experiment):
                 return running_loss/len(train_loader)
         except Exception as e:
             fl.log(f"Error in train_model_with_dynamic_lr(): {e}")
+            return 0.0
             # print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {running_loss/len(train_loader):.4f}, LR: {scheduler.get_last_lr()[0]:.6f}')
 
     def training_loop(self, data_loaders):
@@ -437,22 +439,19 @@ class RecurrenceExperiment(Experiment):
                     all_labels.extend(batch_labels.cpu().numpy())
 
                     # Compute loss based on pairs in the test set
-                    try:
-                        # Generate pairs for loss computation
-                        pairs_1, pairs_2, labels = self.generate_pairs(batch_data, batch_labels, num_samples_for_pairs)
-                        pairs_1, pairs_2, labels = pairs_1.to(self.device), pairs_2.to(self.device), labels.to(self.device)
 
-                        # Compute embeddings for pairs
-                        embeddings_x1 = self.model(pairs_1)
-                        embeddings_x2 = self.model(pairs_2)
+                    # Generate pairs for loss computation
+                    pairs_1, pairs_2, labels = self.generate_pairs(batch_data, batch_labels, num_samples_for_pairs)
+                    pairs_1, pairs_2, labels = pairs_1.to(self.device), pairs_2.to(self.device), labels.to(self.device)
 
-                        # Compute loss
-                        loss = self.criterion(embeddings_x1, embeddings_x2, labels)
-                        running_loss += loss
-                        total_batches += 1
-                    except Exception as e:
-                        print(f"Error generating pairs: {e}")
-                        pass
+                    # Compute embeddings for pairs
+                    embeddings_x1 = self.model(pairs_1)
+                    embeddings_x2 = self.model(pairs_2)
+
+                    # Compute loss
+                    loss = self.criterion(embeddings_x1, embeddings_x2, labels)
+                    running_loss += loss
+                    total_batches += 1
 
             # Average loss over all batches
             if total_batches > 0:
@@ -469,8 +468,9 @@ class RecurrenceExperiment(Experiment):
             return avg_loss, y_pred, y_label
         except Exception as e:
             fl.log(f"Error in knn_in_embedding_space(): {e}")
+            return 0.0, torch.tensor([]), torch.tensor([])
 
-    def test(self, trainloaders, testloader):
+    def test(self, trainloader, testloader):
         try:
             loss = 0.0
             self.model.to(self.device)
@@ -482,7 +482,7 @@ class RecurrenceExperiment(Experiment):
             f1 = MulticlassF1Score(num_classes=self.num_classes, average='macro').to(self.device)
             conf_matrix = MulticlassConfusionMatrix(num_classes=self.num_classes).to(self.device)
 
-            loss, predicted, label = self.knn_in_embedding_space(trainloaders, testloader,  k=1)
+            loss, predicted, label = self.knn_in_embedding_space(trainloader, testloader)
             predicted = torch.tensor(predicted).to(self.device)
             label = torch.tensor(label).to(self.device)
 
@@ -504,8 +504,11 @@ class RecurrenceExperiment(Experiment):
 
     def validation_loop(self, data_loaders):
         try:
+            fl.log("Starting validation")
             train_loader, test_loader = data_loaders
+            fl.log(f"Reading data_loaders: {type(train_loader) | {type(test_loader)}}")
             loss_avg, acc, prec, rec, f1, conf_matrix = self.test(train_loader, test_loader)
+            fl.log("After test")
             return loss_avg, {
                 "TEST_ACC": acc,
                 "TEST_PREC": prec,
