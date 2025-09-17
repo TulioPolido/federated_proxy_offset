@@ -110,6 +110,9 @@ if __name__ == "__main__":
             "labels": torch.cat([f["labels"] for f in test_loaded_files], dim=0),
         }
 
+        fl.log(f"Training data: {len(combined_train_data)}")
+        fl.log(f"Testing data: {len(combined_test_data)}")
+
         dataset = SmellRecurrenceDataset.RecurrenceDataset(
             combined_train_data,
             combined_test_data,
