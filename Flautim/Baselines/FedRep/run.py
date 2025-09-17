@@ -3,23 +3,29 @@ import random
 import json
 import os
 import time
+from collections import OrderedDict
+from typing import Dict, List, Tuple, Union
 
-import RecurrenceModel
 import FedRecurrenceDataset
-import FedRecurrenceExperiment
 
 import flautim as fl
-from flautim.pytorch.common import run_federated, weighted_average
+from flautim.pytorch.common import run_federated
 import flwr
-from flwr.common import ndarrays_to_parameters, Context
+from flwr.common import ndarrays_to_parameters, Context, Metrics, NDArrays, ParametersRecord, Scalar
 from flwr.server import ServerConfig, ServerAppComponents
-from utils import get_create_model_fn, get_server_strategy
+from flwr.client import NumPyClient
+
+from utils import get_create_model_fn, get_server_strategy, get_model_manager_class
+from models import CNNCifar10ModelManager, CNNCifar100ModelManager
+from constants import FEDREP_HEAD_STATE
 
 DATASET = "PAMAP"
 NUM_CHANNELS = 6
 BATCH_SIZE = 32
 NUM_ROUNDS = 175
 NUM_EPOCHS = 10
+
+RESULTS_FILE = "result-{}.json"
 
 ##############
 # SERVER
@@ -43,8 +49,6 @@ def config_json_file(context: Context) -> None:
     with open(RESULTS_FILE, "w+", encoding="UTF-8") as fout:
         json.dump(data, fout, indent=4)
 
-
-
 def evaluate_metrics_aggregation_fn(eval_metrics: List[Tuple[int, Metrics]]) -> Metrics:
     """Weighted metrics evaluation."""
     weights, accuracies, losses = [], [], []
@@ -57,8 +61,7 @@ def evaluate_metrics_aggregation_fn(eval_metrics: List[Tuple[int, Metrics]]) -> 
     # write_res({"accuracy": accuracy, "loss": loss})
     return {"accuracy": accuracy}
 
-
-def generate_server_fn(context, eval_fn):
+def generate_server_fn(context, eval_fn=evaluate_metrics_aggregation_fn):
     def server_fn(context) -> ServerAppComponents:
         """Construct components that set the ServerApp behaviour."""
         config_json_file(context)
@@ -73,7 +76,7 @@ def generate_server_fn(context, eval_fn):
 
         # Define strategy
         strategy = get_server_strategy(
-            context=context, params=parameters, eval_fn=evaluate_metrics_aggregation_fn
+            context=context, params=parameters, eval_fn=eval_fn
         )
         config = ServerConfig(num_rounds=int(num_rounds))
 
@@ -81,10 +84,150 @@ def generate_server_fn(context, eval_fn):
 
     return server_fn
 
+###################
+# CLIENT
+###################
+
+class BaseClient(NumPyClient):
+    """Implementation of Federated Averaging (FedAvg) Client."""
+
+    # pylint: disable=R0913
+    def __init__(
+        self, model_manager: Union[CNNCifar10ModelManager, CNNCifar100ModelManager]
+    ):
+        """Initialize client attributes.
+
+        Args:
+            model_manager: the model manager object
+        """
+        super().__init__()
+        self.model_manager = model_manager
+
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    def get_parameters(self, config: Dict[str, Scalar]) -> NDArrays:
+        """Return the current local model parameters."""
+        return self.model_manager.model.get_parameters()
+
+    def set_parameters(self, parameters: NDArrays, evaluate: bool = False) -> None:
+        """Set the local model parameters to the received parameters.
+
+        Args:
+            parameters: parameters to set the model to.
+            evaluate: whether to evaluate or not.
+        """
+        _ = evaluate
+        model_keys = [
+            k
+            for k in self.model_manager.model.state_dict().keys()
+            if k.startswith("_body") or k.startswith("_head")
+        ]
+        params_dict = zip(model_keys, parameters)
+        state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
+        self.model_manager.model.set_parameters(state_dict)
+
+    def perform_train(self) -> Dict[str, Union[List[Dict[str, float]], int, float]]:
+        """Perform local training to the whole model.
+
+        Returns
+        -------
+            Dict with the train metrics.
+        """
+        self.model_manager.model.enable_body()
+        self.model_manager.model.enable_head()
+
+        return self.model_manager.train(self.device)
+
+    def fit(
+        self, parameters: NDArrays, config: Dict[str, Scalar]
+    ) -> Tuple[NDArrays, int, Dict[str, Union[bool, bytes, float, int, str]]]:
+        """Train the provided parameters using the locally held dataset.
+
+        Args:
+            parameters: The current (global) model parameters.
+            config: configuration parameters for training sent by the server.
+
+        Returns
+        -------
+            Tuple containing the locally updated model parameters, \
+                the number of examples used for training and \
+                the training metrics.
+        """
+        self.set_parameters(parameters)
+        self.perform_train()
+
+        return self.get_parameters(config), self.model_manager.train_dataset_size(), {}
+
+    def evaluate(
+        self, parameters: NDArrays, config: Dict[str, Scalar]
+    ) -> Tuple[float, int, Dict[str, Union[bool, bytes, float, int, str]]]:
+        """Evaluate the provided global parameters using the locally held dataset.
+
+        Args:
+            parameters: The current (global) model parameters.
+            config: configuration parameters for training sent by the server.
+
+        Returns
+        -------
+        Tuple containing the test loss, \
+                the number of examples used for evaluation and \
+                the evaluation metrics.
+        """
+        self.set_parameters(parameters, evaluate=True)
+
+        # Test the model
+        test_results = self.model_manager.test(self.device)
+
+        return (
+            test_results.get("loss", 0.0),
+            self.model_manager.test_dataset_size(),
+            {k: v for k, v in test_results.items() if not isinstance(v, (dict, list))},
+        )
+
+
+class FedRepClient(BaseClient):
+    """Implementation of Federated Personalization (FedRep) Client."""
+
+    def get_parameters(self, config: Dict[str, Scalar]) -> NDArrays:
+        """Return the current local body parameters."""
+        return [
+            val.cpu().numpy()
+            for val in self.model_manager.model.body.state_dict().values()
+        ]
+
+    def set_parameters(self, parameters: NDArrays, evaluate: bool = False) -> None:
+        """Set the local body parameters to the received parameters.
+
+        Args:
+            parameters: parameters to set the body to.
+            evaluate: whether the client is evaluating or not.
+        """
+        model_keys = [
+            k
+            for k in self.model_manager.model.state_dict().keys()
+            if k.startswith("_body")
+        ]
+
+        if not evaluate:
+            # Only update client's local head if it hasn't trained yet
+            model_keys.extend(
+                [
+                    k
+                    for k in self.model_manager.model.state_dict().keys()
+                    if k.startswith("_head")
+                ]
+            )
+
+        state_dict = OrderedDict(
+            (k, torch.from_numpy(v)) for k, v in zip(model_keys, parameters)
+        )
+
+        self.model_manager.model.set_parameters(state_dict)
 
 def generate_client_fn(context, files):
     def create_client_fn(context_flwr):
         try:
+            model_manager_class = get_model_manager_class(context)
             cid = int(context_flwr.node_config["partition-id"])
             file = files[cid]
 
@@ -95,7 +238,7 @@ def generate_client_fn(context, files):
                 use_erase=False,
                 use_jitter=False,
                 use_rotation=True,
-                test_percentage=0.05
+                test_percentage=0.2
             )
 
             trainloader = dataset.dataloader()
@@ -120,37 +263,9 @@ def generate_client_fn(context, files):
 
     return create_client_fn
 
-
-def evaluate_fn(context, test_data):
-    def fn(server_round, parameters, config):
-        try:
-            model = RecurrenceModel.RecurrenceModel(
-                context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS
-            )
-            model.set_parameters(parameters)
-            dataset = FedRecurrenceDataset.RecurrenceDataset(
-                test_data, 
-                batch_size=BATCH_SIZE, 
-                shuffle=False, 
-                test_percentage=1
-            )
-            experiment = FedRecurrenceExperiment.RecurrenceExperiment(
-                model,
-                dataset,
-                context,
-                lr=LEARNING_RATE,
-                epochs=NUM_EPOCHS,
-                weight_decay=WEIGHT_DECAY,
-            )
-
-            config["server_round"] = server_round
-            loss, _, return_dic = experiment.evaluate(parameters, config)
-            return loss, return_dic
-        except Exception as e:
-            print(f"Error in evaluate_fn: {e}")
-
-    return fn
-
+###########
+# RUN
+###########
 
 if __name__ == "__main__":
     try:
@@ -242,8 +357,7 @@ if __name__ == "__main__":
         }
 
         client_fn_callback = generate_client_fn(context, files)
-        evaluate_fn_callback = evaluate_fn(context, combined_test_data)
-        server_fn_callback = generate_server_fn(context, eval_fn=evaluate_fn_callback)
+        server_fn_callback = generate_server_fn(context, eval_fn=None)
 
         # Run federated learning
         run_federated(

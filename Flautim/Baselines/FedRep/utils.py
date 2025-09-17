@@ -5,8 +5,8 @@ from typing import Callable, Type, Union
 from flwr.common import Context, Parameters
 from flwr.server.strategy import FedAvg
 
-from .constants import Algorithm, ModelDatasetName
-from .models import (
+from constants import Algorithm, ModelDatasetName
+from models import (
     CNNCifar10,
     CNNCifar10ModelManager,
     CNNCifar10ModelSplit,
@@ -14,7 +14,7 @@ from .models import (
     CNNCifar100ModelManager,
     CNNCifar100ModelSplit,
 )
-from .strategy import FedRep
+from strategy import FedRep
 
 
 def get_create_model_fn(
