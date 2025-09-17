@@ -1,7 +1,6 @@
 import SmellRecurrenceModel
 import SmellRecurrenceDataset
 import SmellRecurrenceExperiment
-import flwr
 import flautim as fl
 import flautim.metrics as flm
 import torch
