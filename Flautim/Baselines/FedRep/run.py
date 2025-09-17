@@ -1,0 +1,256 @@
+import torch
+import random
+import json
+import os
+import time
+
+import RecurrenceModel
+import FedRecurrenceDataset
+import FedRecurrenceExperiment
+
+import flautim as fl
+from flautim.pytorch.common import run_federated, weighted_average
+import flwr
+from flwr.common import ndarrays_to_parameters, Context
+from flwr.server import ServerConfig, ServerAppComponents
+from utils import get_create_model_fn, get_server_strategy
+
+DATASET = "PAMAP"
+NUM_CHANNELS = 6
+BATCH_SIZE = 32
+NUM_ROUNDS = 175
+NUM_EPOCHS = 10
+
+##############
+# SERVER
+##############
+
+def config_json_file(context: Context) -> None:
+    """Initialize the json file and write the run configurations."""
+    # Initialize the execution results directory.
+    res_save_path = "./results"
+    if not os.path.exists(res_save_path):
+        os.makedirs(res_save_path)
+    res_save_name = time.strftime("%Y-%m-%d-%H-%M-%S")
+    # Set the date and full path of the file to save the results.
+    global RESULTS_FILE  # pylint: disable=global-statement
+    RESULTS_FILE = RESULTS_FILE.format(res_save_name)
+    RESULTS_FILE = f"{res_save_path}/{RESULTS_FILE}"
+    data = {
+        "run_config": dict(context.run_config.items()),
+        "round_res": [],
+    }
+    with open(RESULTS_FILE, "w+", encoding="UTF-8") as fout:
+        json.dump(data, fout, indent=4)
+
+
+
+def evaluate_metrics_aggregation_fn(eval_metrics: List[Tuple[int, Metrics]]) -> Metrics:
+    """Weighted metrics evaluation."""
+    weights, accuracies, losses = [], [], []
+    for num_examples, metric in eval_metrics:
+        weights.append(num_examples)
+        accuracies.append(float(metric["accuracy"]) * num_examples)
+        losses.append(float(metric["loss"]) * num_examples)
+    accuracy = sum(accuracies) / sum(weights)
+    loss = sum(losses) / sum(weights)
+    # write_res({"accuracy": accuracy, "loss": loss})
+    return {"accuracy": accuracy}
+
+
+def generate_server_fn(context, eval_fn):
+    def server_fn(context) -> ServerAppComponents:
+        """Construct components that set the ServerApp behaviour."""
+        config_json_file(context)
+        # Read from config
+
+        num_rounds = NUM_ROUNDS
+
+        # Initialize model parameters
+        create_model_fn, split_class = get_create_model_fn(context)
+        net = split_class(create_model_fn())
+        parameters = ndarrays_to_parameters(net.get_parameters())
+
+        # Define strategy
+        strategy = get_server_strategy(
+            context=context, params=parameters, eval_fn=evaluate_metrics_aggregation_fn
+        )
+        config = ServerConfig(num_rounds=int(num_rounds))
+
+        return ServerAppComponents(strategy=strategy, config=config)
+
+    return server_fn
+
+
+def generate_client_fn(context, files):
+    def create_client_fn(context_flwr):
+        try:
+            cid = int(context_flwr.node_config["partition-id"])
+            file = files[cid]
+
+            dataset = FedRecurrenceDataset.RecurrenceDataset(
+                file,
+                augment_multiplier=2,
+                use_crop=False,
+                use_erase=False,
+                use_jitter=False,
+                use_rotation=True,
+                test_percentage=0.05
+            )
+
+            trainloader = dataset.dataloader()
+            valloader = dataset.dataloader(validation=True)
+
+            # This state variable will only be used by the FedRep algorithm.
+            # We only need to initialize once, since client_fn will be called
+            # again at every invocation of the ClientApp.
+            if FEDREP_HEAD_STATE not in context.state.parameters_records:
+                context.state.parameters_records[FEDREP_HEAD_STATE] = ParametersRecord()
+            client_class = FedRepClient
+
+            model_manager_obj = model_manager_class(
+                context=context, trainloader=trainloader, testloader=valloader
+            )
+
+            # Return client object.
+            client = client_class(model_manager_obj).to_client()
+            return client
+        except Exception as e:
+            print(f"Error in create_client_fn: {e}")
+
+    return create_client_fn
+
+
+def evaluate_fn(context, test_data):
+    def fn(server_round, parameters, config):
+        try:
+            model = RecurrenceModel.RecurrenceModel(
+                context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS
+            )
+            model.set_parameters(parameters)
+            dataset = FedRecurrenceDataset.RecurrenceDataset(
+                test_data, 
+                batch_size=BATCH_SIZE, 
+                shuffle=False, 
+                test_percentage=1
+            )
+            experiment = FedRecurrenceExperiment.RecurrenceExperiment(
+                model,
+                dataset,
+                context,
+                lr=LEARNING_RATE,
+                epochs=NUM_EPOCHS,
+                weight_decay=WEIGHT_DECAY,
+            )
+
+            config["server_round"] = server_round
+            loss, _, return_dic = experiment.evaluate(parameters, config)
+            return loss, return_dic
+        except Exception as e:
+            print(f"Error in evaluate_fn: {e}")
+
+    return fn
+
+
+if __name__ == "__main__":
+    try:
+        context = fl.init()
+        # Generate a random seed
+        seed = random.randint(0, 2**32 - 1)
+        random.seed(seed)
+        fl.log(f"Using random seed: {seed}")
+
+        if DATASET == "PAMAP":
+            # Number of training clients
+            TOTAL_USERS = 8
+            NUM_CLIENTS = 7
+            TEST_USERS = TOTAL_USERS - NUM_CLIENTS
+            NUM_CLASSES = 7
+            WINDOW_SIZE = 1024
+            STRIDE = 256
+            LEARNING_RATE = 1e-4
+            LEARNING_RATE_STEP = 3
+            LEARNING_RATE_GAMMA = 0.5
+            WEIGHT_DECAY = 6.7e-5
+
+            all_files = [i for i in range(1, TOTAL_USERS + 1)]
+
+            # Shuffle and split
+            test_files = [8]
+            train_files = [i for i in all_files if i not in test_files]
+            # test_files = random.sample(all_files, TEST_USERS)
+            # train_files = [f for f in all_files if f not in test_files]
+            fl.log(f"Train users: {train_files}")
+            fl.log(f"Test users: {test_files}")
+
+            # Load training client files
+            files = [
+                torch.load(
+                    f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
+                )
+                for i in train_files
+            ]
+
+            # Load and combine test files
+            test_files = [
+                torch.load(
+                    f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
+                )
+                for i in test_files
+            ]
+
+        elif DATASET == "WISDM":
+            # Number of training clients
+            TOTAL_USERS = 51
+            NUM_CLIENTS = 41
+            TEST_USERS = TOTAL_USERS - NUM_CLIENTS
+            NUM_CLASSES = 5
+            WINDOW_SIZE = 256
+            STRIDE = 64
+            LEARNING_RATE = 6.9e-4
+            LEARNING_RATE_STEP = 13
+            LEARNING_RATE_GAMMA = 0.53
+            WEIGHT_DECAY = 1.1e-5
+
+            all_files = [i for i in range(1, TOTAL_USERS + 1)]
+
+            # Shuffle and split
+            test_files = random.sample(all_files, TEST_USERS)
+            train_files = [f for f in all_files if f not in test_files]
+            fl.log(f"Train users: {train_files}")
+            fl.log(f"Test users: {test_files}")
+
+            # Load training client files
+            files = [
+                torch.load(
+                    f"./data/WISDM_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
+                )
+                for i in train_files
+            ]
+
+            # Load and combine test files
+            test_files = [
+                torch.load(
+                    f"./data/WISDM_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
+                )
+                for i in test_files
+            ]
+
+        combined_test_data = {
+            "data": torch.cat([f["data"] for f in test_files], dim=0),
+            "labels": torch.cat([f["labels"] for f in test_files], dim=0),
+        }
+
+        client_fn_callback = generate_client_fn(context, files)
+        evaluate_fn_callback = evaluate_fn(context, combined_test_data)
+        server_fn_callback = generate_server_fn(context, eval_fn=evaluate_fn_callback)
+
+        # Run federated learning
+        run_federated(
+            client_fn=client_fn_callback,
+            server_fn=server_fn_callback,
+            num_clients=NUM_CLIENTS,
+            num_rounds=NUM_ROUNDS,
+        )
+    except Exception as e:
+        fl.log(f"Error in run.py: {e}")

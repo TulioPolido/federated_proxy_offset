@@ -200,46 +200,48 @@ class RecurrenceExperiment(Experiment):
             margin=1.0,
             **kwargs
             ):
-        fl.log("Creating Experiment")
-        super(RecurrenceExperiment, self)\
-            .__init__(model, dataset, context, **kwargs)
-        self.epochs = epochs
-        self.num_classes = num_classes
-        self.margin = margin
-        self.embedding_size = embedding_size
-        self.lr = lr
-        self.pre_train_lr = pre_train_lr
-        self.lr_step = lr_step
-        self.lr_gamma = lr_gamma
-        self.weight_decay = weight_decay
+        
+            super(RecurrenceExperiment, self)\
+                .__init__(model, dataset, context, **kwargs)
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model.to(self.device)
+            self.epochs = epochs
+            self.num_classes = num_classes
+            self.margin = margin
+            self.embedding_size = embedding_size
+            self.lr = lr
+            self.pre_train_lr = pre_train_lr
+            self.lr_step = lr_step
+            self.lr_gamma = lr_gamma
+            self.weight_decay = weight_decay
 
-        self.criterion = LearnablePrototypicalLossWithDiversityRegularization(
-            embedding_dim=self.embedding_size,
-            num_similar_prototypes=2,
-            num_dissimilar_prototypes=2
-        ).to(self.device)
-        self.optimizer1 = torch.optim.Adam(
-            list(self.criterion.parameters()),
-            lr=self.lr
-        )
-        self.optimizer2 = torch.torch.optim.SGD(
-            [{'params': self.model.parameters(), 'lr': self.lr}]
-            + [{'params': self.criterion.parameters(), 'lr': self.lr}]
-        )
-        self.pre_criterion = PrototypicalCenterLoss(
-            num_classes=self.num_classes,
-            embedding_size=self.embedding_size,
-            margin=self.margin
-        )
-        self.pre_optimizer = torch.optim.Adam(
-            list(model.parameters()) + list(self.pre_criterion.parameters()),
-            lr=self.pre_train_lr
-        )
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            self.model.to(self.device)
 
-        self.scheduler = StepLR(self.optimizer1, step_size=lr_step, gamma=lr_gamma)
+            self.criterion = LearnablePrototypicalLossWithDiversityRegularization(
+                embedding_dim=self.embedding_size,
+                num_similar_prototypes=2,
+                num_dissimilar_prototypes=2
+            ).to(self.device)
+            self.optimizer1 = torch.optim.Adam(
+                list(self.criterion.parameters()),
+                lr=self.lr
+            )
+            self.optimizer2 = torch.torch.optim.SGD(
+                [{'params': self.model.parameters(), 'lr': self.lr}]
+                + [{'params': self.criterion.parameters(), 'lr': self.lr}]
+            )
+            self.pre_criterion = PrototypicalCenterLoss(
+                num_classes=self.num_classes,
+                embedding_size=self.embedding_size,
+                margin=self.margin
+            ).to(self.device)
+            self.pre_optimizer = torch.optim.Adam(
+                list(model.parameters()) + list(self.pre_criterion.parameters()),
+                lr=self.pre_train_lr
+            )
+
+            self.scheduler = StepLR(self.optimizer1, step_size=lr_step, gamma=lr_gamma)
+
 
 ################################
 # TRAINING FUNCTIONS ######
@@ -247,7 +249,7 @@ class RecurrenceExperiment(Experiment):
 
     # Modify the pretrain function to use prototypical center loss
     def pretrain_model_prototypical_center(self, dataloader, num_epochs):
-        try:
+
             self.model.train()  # Set the self.model to training mode
 
             for epoch in range(num_epochs):
@@ -271,8 +273,7 @@ class RecurrenceExperiment(Experiment):
                     running_loss += loss.item()
 
                 # fl.log(f'Pretrain Epoch [{epoch+1}/{num_epochs}], Loss: {running_loss/len(dataloader):.4f}')
-        except Exception as e:
-            fl.log(f"Error in pretrain_model_prototypical_center(): {e}")
+
 
     def generate_pairs(self, X, Y, N):
         try:
@@ -393,8 +394,8 @@ class RecurrenceExperiment(Experiment):
 # TESTING  FUNCTIONS ######
 ################################
 
-    def knn_in_embedding_space(self, train_loader, test_loader, k=1, num_samples_for_pairs=200):
-        try:
+    def knn_in_embedding_space(self, train_loader, test_loader, k=1, num_samples_for_pairs=20):
+
             self.model.eval()
 
             # Collect train embeddings and labels
@@ -463,12 +464,10 @@ class RecurrenceExperiment(Experiment):
             y_label = torch.tensor(all_labels)
 
             return avg_loss, y_pred, y_label
-        except Exception as e:
-            fl.log(f"Error in knn_in_embedding_space(): {e}")
-            return 0.0, torch.tensor([]), torch.tensor([])
+
 
     def test(self, trainloader, testloader):
-        try:
+
             loss = 0.0
             self.model.to(self.device)
             self.model.eval()
@@ -495,17 +494,13 @@ class RecurrenceExperiment(Experiment):
             f1_score = f1.compute().item()
             conf = conf_matrix.compute().cpu().numpy()
 
-            return loss, acc, prec, rec, f1_score, conf
-        except Exception as e:
-            fl.log(f"Error in test(): {e}")
+            return float(loss), acc, prec, rec, f1_score, conf
+
 
     def validation_loop(self, data_loaders):
-        try:
-            fl.log("Starting validation")
+
             train_loader, test_loader = data_loaders
-            fl.log(f"Reading data_loaders: {len(train_loader)} | {len(test_loader)}")
             loss_avg, acc, prec, rec, f1, conf_matrix = self.test(train_loader, test_loader)
-            fl.log(f"After test: {loss_avg}, {acc}, {prec}, {rec}, {f1}")
             return loss_avg, {
                 "TEST_ACC": acc,
                 "TEST_PREC": prec,
@@ -513,5 +508,4 @@ class RecurrenceExperiment(Experiment):
                 "TEST_F1": f1,
                 # "TEST_CONF": str(conf_matrix),
             }
-        except Exception as e:
-            fl.log(f"Error in validation loop: {e}")
+

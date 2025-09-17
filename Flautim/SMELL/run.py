@@ -49,34 +49,34 @@ def generate_server_fn(context, eval_fn=None):
 def generate_client_fn(context, files, test_file):
     def create_client_fn(context_flwr):
       
-        cid = int(context_flwr.node_config["partition-id"])
-        file = files[cid]
+            cid = int(context_flwr.node_config["partition-id"])
+            file = files[cid]
 
-        model = SmellRecurrenceModel.RecurrenceModel(
-            context, emb_dim=EMB_DIM, num_channels=NUM_CHANNELS, suffix=cid
-        )
+            model = SmellRecurrenceModel.RecurrenceModel(
+                context, emb_dim=EMB_DIM, num_channels=NUM_CHANNELS, suffix=cid
+            )
 
-        dataset = SmellRecurrenceDataset.RecurrenceDataset(
-            train_file=file,
-            test_file=test_file,
-            augment_multiplier=2,
-            use_crop=False,
-            use_erase=False,
-            use_jitter=False,
-            use_rotation=True,
-        )
+            dataset = SmellRecurrenceDataset.RecurrenceDataset(
+                train_file=file,
+                test_file=test_file,
+                augment_multiplier=2,
+                use_crop=False,
+                use_erase=False,
+                use_jitter=False,
+                use_rotation=True,
+            )
 
-        return SmellRecurrenceExperiment.RecurrenceExperiment(
-            model,
-            dataset,
-            context,
-            lr=LEARNING_RATE,
-            epochs=NUM_EPOCHS,
-            weight_decay=WEIGHT_DECAY,
-            lr_step=LEARNING_RATE_STEP,
-            lr_gamma=LEARNING_RATE_GAMMA,
-            embedding_size=EMB_DIM
-        ).to_client()
+            return SmellRecurrenceExperiment.RecurrenceExperiment(
+                model,
+                dataset,
+                context,
+                lr=LEARNING_RATE,
+                epochs=NUM_EPOCHS,
+                weight_decay=WEIGHT_DECAY,
+                lr_step=LEARNING_RATE_STEP,
+                lr_gamma=LEARNING_RATE_GAMMA,
+                embedding_size=EMB_DIM
+            ).to_client()
 
 
     return create_client_fn
@@ -84,7 +84,7 @@ def generate_client_fn(context, files, test_file):
 
 def evaluate_fn(context, test_data):
      def fn(server_round, parameters, config):
-         try:
+         
             model = SmellRecurrenceModel.RecurrenceModel(
                 context, emb_dim=EMB_DIM, num_channels=NUM_CHANNELS
             )
@@ -111,8 +111,7 @@ def evaluate_fn(context, test_data):
             fl.log(f"After evaluate: {return_dic}")
             
             return loss, return_dic
-         except Exception as e:
-             print(f"Error in evaluate_fn: {e}")
+
 
      return fn
 
@@ -208,7 +207,7 @@ if __name__ == "__main__":
 
         client_fn_callback = generate_client_fn(context, files, combined_test_data)
         evaluate_fn_callback = evaluate_fn(context, combined_test_data)
-        server_fn_callback = generate_server_fn(context, eval_fn=None) 
+        server_fn_callback = generate_server_fn(context, eval_fn= evaluate_fn_callback) 
 
         # Run federated learning
         run_federated(
