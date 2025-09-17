@@ -342,7 +342,7 @@ class RecurrenceExperiment(Experiment):
                     # Create pairs of samples and labels (1 for similar, 0 for dissimilar)
                     # pairs, labels = create_pairs(batch_data, batch_labels)
                     if True:
-                        pairs_1, pairs_2, labels = self.generate_pairs(batch_data, batch_labels, 200)
+                        pairs_1, pairs_2, labels = self.generate_pairs(batch_data, batch_labels, 50)
                         pairs_1, pairs_2, labels = pairs_1.to(self.device), pairs_2.to(self.device), labels.to(self.device)
 
                     # Compute embeddings using the frozen encoder
@@ -498,7 +498,6 @@ class RecurrenceExperiment(Experiment):
         return loss_avg, {
             "TEST_ACC": acc,
             "TEST_PREC": prec,
-            "Recall": rec,
             "TEST_F1": f1,
-            # "TEST_CONF": str(conf_matrix),
+            "TEST_CONF": str(conf_matrix),
         }

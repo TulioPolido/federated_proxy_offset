@@ -12,8 +12,8 @@ import random
 DATASET = "PAMAP"
 NUM_CHANNELS = 6
 BATCH_SIZE = 32
-NUM_ROUNDS = 5
-NUM_EPOCHS = 10
+NUM_ROUNDS = 50
+NUM_EPOCHS = 5
 EMB_DIM = 64
 
 
@@ -71,6 +71,7 @@ def generate_client_fn(context, files, test_file):
                 dataset,
                 context,
                 lr=LEARNING_RATE,
+                pre_train_lr=PRE_TRAIN_LEARNING_RATE
                 epochs=NUM_EPOCHS,
                 weight_decay=WEIGHT_DECAY,
                 lr_step=LEARNING_RATE_STEP,
@@ -132,7 +133,8 @@ if __name__ == "__main__":
             NUM_CLASSES = 7
             WINDOW_SIZE = 1024
             STRIDE = 256
-            LEARNING_RATE = 1e-4
+            PRE_TRAIN_LEARNING_RATE = 1e-4
+            LEARNING_RATE = 1e-5
             LEARNING_RATE_STEP = 3
             LEARNING_RATE_GAMMA = 0.5
             WEIGHT_DECAY = 6.7e-5
@@ -171,9 +173,10 @@ if __name__ == "__main__":
             NUM_CLASSES = 5
             WINDOW_SIZE = 256
             STRIDE = 64
-            LEARNING_RATE = 6.9e-4
-            LEARNING_RATE_STEP = 13
-            LEARNING_RATE_GAMMA = 0.53
+            PRE_TRAIN_LEARNING_RATE = 1e-4
+            LEARNING_RATE = 1e-5
+            LEARNING_RATE_STEP = 3
+            LEARNING_RATE_GAMMA = 0.5
             WEIGHT_DECAY = 1.1e-5
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
