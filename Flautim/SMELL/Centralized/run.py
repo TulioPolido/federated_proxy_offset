@@ -46,7 +46,7 @@ if __name__ == "__main__":
             fl.log(f"Test users: {test_files}")
 
             # Load training client files
-            files = [
+            train_loaded_files = [
                 torch.load(
                     f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
                 )
@@ -54,7 +54,7 @@ if __name__ == "__main__":
             ]
 
             # Load and combine test files
-            test_files = [
+            test_loaded_files = [
                 torch.load(
                     f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
                 )
@@ -83,7 +83,7 @@ if __name__ == "__main__":
             fl.log(f"Test users: {test_files}")
 
             # Load training client files
-            files = [
+            train_loaded_files = [
                 torch.load(
                     f"./data/WISDM_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
                 )
@@ -91,7 +91,7 @@ if __name__ == "__main__":
             ]
 
             # Load and combine test files
-            test_files = [
+            test_loaded_files = [
                 torch.load(
                     f"./data/WISDM_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
                 )
@@ -100,19 +100,19 @@ if __name__ == "__main__":
 
         fl.log("Files loaded")
         # Concatenate
-        train_data = {
-            "data": torch.cat([d["data"] for d in train_files], dim=0),
-            "labels": torch.cat([d["labels"] for d in train_files], dim=0),
+        combined_train_data = {
+            "data": torch.cat([f["data"] for f in train_loaded_files], dim=0),
+            "labels": torch.cat([f["labels"] for f in train_loaded_files], dim=0),
         }
 
-        test_data = {
-            "data": torch.cat([d["data"] for d in test_files], dim=0),
-            "labels": torch.cat([d["labels"] for d in test_files], dim=0),
+        combined_test_data = {
+            "data": torch.cat([f["data"] for f in test_loaded_files], dim=0),
+            "labels": torch.cat([f["labels"] for f in test_loaded_files], dim=0),
         }
 
         dataset = SmellRecurrenceDataset.RecurrenceDataset(
-            train_data,
-            test_data,
+            combined_train_data,
+            combined_test_data,
             batch_size=BATCH_SIZE,
             augment_multiplier=2,
             use_crop=False,
