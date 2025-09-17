@@ -492,7 +492,9 @@ class RecurrenceExperiment(Experiment):
 
     def validation_loop(self, data_loaders):
         train_loader, test_loader = data_loaders
+        fl.log(f"Dataloaders size: {len(train_loader)} | {len(test_loader)}")
         loss_avg, acc, prec, rec, f1, conf_matrix = self.test(train_loader, test_loader)
+        fl.log(f"TEST LOOP: {loss_avg} {acc} {prec}")
         return loss_avg, {
             "TEST_ACC": acc,
             "TEST_PREC": prec,

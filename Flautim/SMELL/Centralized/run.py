@@ -123,7 +123,7 @@ if __name__ == "__main__":
 
         fl.log("Dataset created")
         model = SmellRecurrenceModel.RecurrenceModel(
-            context, emb_dim=EMB_DIM, num_channels=NUM_CHANNELS, suffix=0
+            context, emb_dim=EMB_DIM, num_channels=NUM_CHANNELS
         )
 
         # Run federated learning
