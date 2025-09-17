@@ -122,8 +122,6 @@ class RecurrenceDataset(Dataset):
             train = copy.deepcopy(self)
             train.data = self.data
             train.labels = self.labels
-            train.test_data = self.test_data
-            train.test_labels = self.test_labels
             return train
         except Exception as e:
             fl.log(f"Error in RecurrenceDataset train(): {e}")
@@ -131,10 +129,8 @@ class RecurrenceDataset(Dataset):
     def validation(self):
         try:
             val = copy.deepcopy(self)
-            val.data = self.data
-            val.labels = self.labels
-            val.test_data = self.test_data
-            val.test_labels = self.test_labels
+            val.data = self.test_data
+            val.labels = self.test_labels
             return val
         except Exception as e:
             fl.log(f"Error in RecurrenceDataset validation(): {e}")
