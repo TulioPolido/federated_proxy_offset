@@ -31,9 +31,9 @@ if __name__ == "__main__":
             WINDOW_SIZE = 1024
             STRIDE = 256
             PRE_TRAIN_LEARNING_RATE = 1e-4
-            LEARNING_RATE = 1e-5
-            LEARNING_RATE_STEP = 3
-            LEARNING_RATE_GAMMA = 0.5
+            LEARNING_RATE = 5e-5
+            LEARNING_RATE_STEP = 10
+            LEARNING_RATE_GAMMA = 0.8
             WEIGHT_DECAY = 6.7e-5
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]

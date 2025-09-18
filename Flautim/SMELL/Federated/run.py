@@ -13,7 +13,7 @@ DATASET = "PAMAP"
 NUM_CHANNELS = 6
 BATCH_SIZE = 32
 NUM_ROUNDS = 50
-NUM_EPOCHS = 5
+NUM_EPOCHS = 2
 EMB_DIM = 64
 
 
@@ -71,7 +71,7 @@ def generate_client_fn(context, files, test_file):
                 dataset,
                 context,
                 lr=LEARNING_RATE,
-                pre_train_lr=PRE_TRAIN_LEARNING_RATE
+                pre_train_lr=PRE_TRAIN_LEARNING_RATE,
                 epochs=NUM_EPOCHS,
                 weight_decay=WEIGHT_DECAY,
                 lr_step=LEARNING_RATE_STEP,
@@ -98,10 +98,7 @@ def evaluate_fn(context, test_data):
             experiment = SmellRecurrenceExperiment.RecurrenceExperiment(
                 model,
                 dataset,
-                context,
-                lr=LEARNING_RATE,
-                epochs=NUM_EPOCHS,
-                weight_decay=WEIGHT_DECAY,
+                context
             )
 
             fl.log("Before evaluate")
@@ -210,7 +207,7 @@ if __name__ == "__main__":
 
         client_fn_callback = generate_client_fn(context, files, combined_test_data)
         evaluate_fn_callback = evaluate_fn(context, combined_test_data)
-        server_fn_callback = generate_server_fn(context, eval_fn= evaluate_fn_callback) 
+        server_fn_callback = generate_server_fn(context, eval_fn=None) 
 
         # Run federated learning
         run_federated(

@@ -379,9 +379,9 @@ class RecurrenceExperiment(Experiment):
     def training_loop(self, data_loaders):
         try:
             train_loader, _ = data_loaders
-            self.pretrain_model_prototypical_center(train_loader, 2)
-            loss_avg1 = self.train_model_with_dynamic_lr(train_loader, self.optimizer1, self.epochs)
-            loss_avg2 = self.train_model_with_dynamic_lr(train_loader, self.optimizer2, self.epochs)
+            self.pretrain_model_prototypical_center(train_loader, 1)
+            loss_avg1 = self.train_model_with_dynamic_lr(train_loader, self.optimizer1, 1)
+            loss_avg2 = self.train_model_with_dynamic_lr(train_loader, self.optimizer2, 1)
             return (loss_avg1 + loss_avg2) / 2, {}
         except Exception as e:
             fl.log(f"Error in training loop: {e}")
