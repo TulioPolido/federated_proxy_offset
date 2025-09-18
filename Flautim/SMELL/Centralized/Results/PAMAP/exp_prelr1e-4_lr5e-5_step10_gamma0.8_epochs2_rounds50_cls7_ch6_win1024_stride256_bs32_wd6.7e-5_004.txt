@@ -1,0 +1,27 @@
+=== Experiment Parameters ===
+exp
+prelr 1e-4
+lr 5e-5
+step 10
+gamma 0.8
+epochs 2
+rounds 50
+cls 7
+ch 6
+win 1024
+stride 256
+bs 32
+wd 6.7e-5
+004
+
+=== Best Epoch Results per Experiment ===
+
+Experiment A:
+Balanced Accuracy: 0.775647759437561
+Precision: 0.8155650496482849
+F1 Score: 0.7866694927215576
+
+=== Average Across Experiments ===
+Average Balanced Accuracy: 0.7756
+Average Precision: 0.8156
+Average F1 Score: 0.7867
