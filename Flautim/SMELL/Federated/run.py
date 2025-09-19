@@ -12,7 +12,7 @@ import random
 DATASET = "PAMAP"
 NUM_CHANNELS = 6
 BATCH_SIZE = 32
-NUM_ROUNDS = 50
+NUM_ROUNDS = 100
 NUM_EPOCHS = 2
 EMB_DIM = 64
 
@@ -131,9 +131,9 @@ if __name__ == "__main__":
             WINDOW_SIZE = 1024
             STRIDE = 256
             PRE_TRAIN_LEARNING_RATE = 1e-4
-            LEARNING_RATE = 1e-5
-            LEARNING_RATE_STEP = 3
-            LEARNING_RATE_GAMMA = 0.5
+            LEARNING_RATE = 5e-5
+            LEARNING_RATE_STEP = 5
+            LEARNING_RATE_GAMMA = 0.8
             WEIGHT_DECAY = 6.7e-5
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
