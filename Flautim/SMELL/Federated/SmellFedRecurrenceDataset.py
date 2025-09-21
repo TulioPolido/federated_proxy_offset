@@ -9,35 +9,35 @@ import random
 
 class RecurrenceDataset(Dataset):
     def __init__(
-            self,
-            train_file,
-            test_file=None,
-            augment_multiplier=0,
-            use_crop=False,
-            use_erase=False,
-            use_jitter=False,
-            use_rotation=False,
-            **kwargs):
+        self,
+        file,
+        augment_multiplier=0,
+        use_crop=False,
+        use_erase=False,
+        use_jitter=False,
+        use_rotation=False,
+        test_size=0.2,
+        **kwargs,
+    ):
         try:
-            super(RecurrenceDataset, self)\
-                .__init__(name="RecurrenceDataset", **kwargs)
+            super(RecurrenceDataset, self).__init__(name="RecurrenceDataset", **kwargs)
             # Train set
-            self.data = train_file['data'].float().permute(0, 3, 1, 2)
-            self.labels = train_file['labels'].long()
+            self.data = file["data"].float().permute(0, 3, 1, 2)
+            self.labels = file["labels"].long()
+            self.test_size = test_size
 
-            # Optional test set
-            if test_file is not None:
-                self.test_data = test_file['data'].float().permute(0, 3, 1, 2)
-                self.test_labels = test_file['labels'].long()
-            else:
-                self.test_data = None
-                self.test_labels = None
+            # Create split indices once
+            num_samples = len(self.data)
+            indices = torch.randperm(num_samples)
+            split = int(num_samples * (1 - self.test_size))
+            self.train_indices = indices[:split]
+            self.val_indices = indices[split:]
 
             self.xdtype = torch.float32
             self.ydtype = torch.int64
-            self.batch_size = kwargs.get('batch_size', 32)
-            self.shuffle = kwargs.get('shuffle', True)
-            self.num_workers = kwargs.get('num_workers', 1)
+            self.batch_size = kwargs.get("batch_size", 32)
+            self.shuffle = kwargs.get("shuffle", True)
+            self.num_workers = kwargs.get("num_workers", 1)
 
             # Augmentation options
             self.augment_multiplier = augment_multiplier
@@ -102,17 +102,32 @@ class RecurrenceDataset(Dataset):
                     train_set.data = torch.stack(augmented_data)
                     train_set.labels = torch.stack(augmented_labels)
 
-                return [DataLoader(train_set, batch_size=self.batch_size,
-                        shuffle=True, num_workers=self.num_workers), None]
+                return [
+                    DataLoader(
+                        train_set,
+                        batch_size=self.batch_size,
+                        shuffle=True,
+                        num_workers=self.num_workers,
+                    ),
+                    None,
+                ]
 
             else:
                 train_set = self.train()
                 test_set = self.validation()
 
-                train_loader = DataLoader(train_set, batch_size=self.batch_size,
-                                          shuffle=True, num_workers=self.num_workers)
-                test_loader = DataLoader(test_set, batch_size=self.batch_size,
-                                         shuffle=False, num_workers=self.num_workers)
+                train_loader = DataLoader(
+                    train_set,
+                    batch_size=self.batch_size,
+                    shuffle=True,
+                    num_workers=self.num_workers,
+                )
+                test_loader = DataLoader(
+                    test_set,
+                    batch_size=self.batch_size,
+                    shuffle=False,
+                    num_workers=self.num_workers,
+                )
                 return [train_loader, test_loader]
         except Exception as e:
             fl.log(f"Error in RecurrenceDataset dataloader(): {e}")
@@ -120,10 +135,8 @@ class RecurrenceDataset(Dataset):
     def train(self):
         try:
             train = copy.deepcopy(self)
-            train.data = self.data
-            train.labels = self.labels
-            train.test_data = self.test_data
-            train.test_labels = self.test_labels
+            train.data = self.data[self.train_indices]
+            train.labels = self.labels[self.train_indices]
             return train
         except Exception as e:
             fl.log(f"Error in RecurrenceDataset train(): {e}")
@@ -131,10 +144,8 @@ class RecurrenceDataset(Dataset):
     def validation(self):
         try:
             val = copy.deepcopy(self)
-            val.data = self.data
-            val.labels = self.labels
-            val.test_data = self.test_data
-            val.test_labels = self.test_labels
+            val.data = self.data[self.val_indices]
+            val.labels = self.labels[self.val_indices]
             return val
         except Exception as e:
             fl.log(f"Error in RecurrenceDataset validation(): {e}")
