@@ -24,14 +24,18 @@ class RecurrenceDataset(Dataset):
             # Train set
             self.data = file["data"].float().permute(0, 3, 1, 2)
             self.labels = file["labels"].long()
-            self.test_size = test_size
+            self.test_size = int(test_size * len(self.labels))
 
-            # Create split indices once
-            num_samples = len(self.data)
-            indices = torch.randperm(num_samples)
-            split = int(num_samples * (1 - self.test_size))
-            self.train_indices = indices[:split]
-            self.val_indices = indices[split:]
+            # Shuffle both data and labels in the same order
+            indices = torch.randperm(len(self.labels))
+            self.data = self.data[indices]
+            self.labels = self.labels[indices]
+
+            self.train_data = self.data[: -self.test_size]
+            self.train_labels = self.labels[: -self.test_size]
+
+            self.test_data = self.data[-self.test_size :]
+            self.test_labels = self.labels[-self.test_size :]
 
             self.xdtype = torch.float32
             self.ydtype = torch.int64
@@ -132,23 +136,17 @@ class RecurrenceDataset(Dataset):
         except Exception as e:
             fl.log(f"Error in RecurrenceDataset dataloader(): {e}")
 
-    def train(self):
-        try:
-            train = copy.deepcopy(self)
-            train.data = self.data[self.train_indices]
-            train.labels = self.labels[self.train_indices]
-            return train
-        except Exception as e:
-            fl.log(f"Error in RecurrenceDataset train(): {e}")
+    def train(self) -> Dataset:
+        train = copy.deepcopy(self)
+        train.data = self.train_data
+        train.labels = self.train_labels
+        return copy.deepcopy(train)
 
-    def validation(self):
-        try:
-            val = copy.deepcopy(self)
-            val.data = self.data[self.val_indices]
-            val.labels = self.labels[self.val_indices]
-            return val
-        except Exception as e:
-            fl.log(f"Error in RecurrenceDataset validation(): {e}")
+    def validation(self) -> Dataset:
+        val = copy.deepcopy(self)
+        val.data = self.test_data
+        val.labels = self.test_labels
+        return copy.deepcopy(val)
 
     def __len__(self):
         try:
