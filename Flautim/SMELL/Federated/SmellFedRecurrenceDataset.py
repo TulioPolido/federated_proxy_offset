@@ -10,32 +10,25 @@ import random
 class RecurrenceDataset(Dataset):
     def __init__(
         self,
-        file,
+        train_file,
+        test_file,
         augment_multiplier=0,
         use_crop=False,
         use_erase=False,
         use_jitter=False,
         use_rotation=False,
-        test_size=0.2,
         **kwargs,
     ):
         try:
             super(RecurrenceDataset, self).__init__(name="RecurrenceDataset", **kwargs)
             # Train set
-            self.data = file["data"].float().permute(0, 3, 1, 2)
-            self.labels = file["labels"].long()
-            self.test_size = int(test_size * len(self.labels))
+            self.data = train_file["data"].float().permute(0, 3, 1, 2)
+            self.labels = train_file["labels"].long()
+            self.train_data = self.data
+            self.train_labels = self.labels
 
-            # Shuffle both data and labels in the same order
-            indices = torch.randperm(len(self.labels))
-            self.data = self.data[indices]
-            self.labels = self.labels[indices]
-
-            self.train_data = self.data[: -self.test_size]
-            self.train_labels = self.labels[: -self.test_size]
-
-            self.test_data = self.data[-self.test_size :]
-            self.test_labels = self.labels[-self.test_size :]
+            self.test_data = test_file["data"].float().permute(0, 3, 1, 2)
+            self.test_labels = test_file["labels"].long()
 
             self.xdtype = torch.float32
             self.ydtype = torch.int64

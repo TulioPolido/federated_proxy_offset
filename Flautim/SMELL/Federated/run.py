@@ -46,18 +46,37 @@ def generate_server_fn(context, eval_fn=None):
     return create_server_fn
 
 
-def generate_client_fn(context, files, test_file):
+def generate_client_fn(context, files):
     def create_client_fn(context_flwr):
       
             cid = int(context_flwr.node_config["partition-id"])
             file = files[cid]
+
+            data = file["data"]
+            labels = file["labels"]
+
+            # shuffle indices
+            n_samples = len(data)
+            indices = torch.randperm(n_samples)
+
+            split = int(0.8 * n_samples)  # 80% train, 20% test
+            train_idx, test_idx = indices[:split], indices[split:]
+
+            train_file = {
+                "data": data[train_idx],
+                "labels": labels[train_idx]
+            }
+            test_file = {
+                "data": data[test_idx],
+                "labels": labels[test_idx]
+            }
 
             model = SmellRecurrenceModel.RecurrenceModel(
                 context, emb_dim=EMB_DIM, num_channels=NUM_CHANNELS, suffix=cid
             )
 
             dataset = SmellRecurrenceDataset.RecurrenceDataset(
-                train_file=file,
+                train_file=train_file,
                 test_file=test_file,
                 augment_multiplier=2,
                 use_crop=False,
@@ -83,7 +102,7 @@ def generate_client_fn(context, files, test_file):
     return create_client_fn
 
 
-def evaluate_fn(context, test_data):
+def evaluate_fn(context):
      def fn(server_round, parameters, config):
         pass
 
@@ -115,28 +134,12 @@ if __name__ == "__main__":
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
-            # Shuffle and split
-            test_files = [7]
-            train_files = [i for i in all_files if i not in test_files]
-            # test_files = random.sample(all_files, TEST_USERS)
-            # train_files = [f for f in all_files if f not in test_files]
-            fl.log(f"Train users: {train_files}")
-            fl.log(f"Test users: {test_files}")
-
             # Load training client files
             files = [
                 torch.load(
                     f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
                 )
-                for i in train_files
-            ]
-
-            # Load and combine test files
-            test_files = [
-                torch.load(
-                    f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
-                )
-                for i in test_files
+                for i in all_files
             ]
 
         elif DATASET == "WISDM":
@@ -155,35 +158,17 @@ if __name__ == "__main__":
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
-            # Shuffle and split
-            test_files = [random.sample(all_files, TEST_USERS)]
-            train_files = [f for f in all_files if f not in test_files]
-            fl.log(f"Train users: {train_files}")
-            fl.log(f"Test users: {test_files}")
-
             # Load training client files
             files = [
                 torch.load(
                     f"./data/WISDM_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
                 )
-                for i in train_files
+                for i in all_files
             ]
 
-            # Load and combine test files
-            test_files = [
-                torch.load(
-                    f"./data/WISDM_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
-                )
-                for i in test_files
-            ]
 
-        combined_test_data = {
-            "data": torch.cat([f["data"] for f in test_files], dim=0),
-            "labels": torch.cat([f["labels"] for f in test_files], dim=0),
-        }
-
-        client_fn_callback = generate_client_fn(context, files, combined_test_data)
-        evaluate_fn_callback = evaluate_fn(context, combined_test_data)
+        client_fn_callback = generate_client_fn(context, files)
+        evaluate_fn_callback = evaluate_fn(context)
         server_fn_callback = generate_server_fn(context, eval_fn=None) 
 
         # Run federated learning
