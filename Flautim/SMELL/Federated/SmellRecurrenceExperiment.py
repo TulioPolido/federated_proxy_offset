@@ -249,263 +249,247 @@ class RecurrenceExperiment(Experiment):
 
     # Modify the pretrain function to use prototypical center loss
     def pretrain_model_prototypical_center(self, dataloader, num_epochs):
+        self.model.train()  # Set the self.model to training mode
 
-            self.model.train()  # Set the self.model to training mode
+        for epoch in range(num_epochs):
+            running_loss = 0.0
+            for batch_data, batch_labels in dataloader:
+                # batch_data = batch_data.view(batch_data.size(0), -1).to(device)
+                batch_data = batch_data.to(self.device)
+                batch_labels = batch_labels.to(self.device)
 
-            for epoch in range(num_epochs):
-                running_loss = 0.0
-                for batch_data, batch_labels in dataloader:
-                    # batch_data = batch_data.view(batch_data.size(0), -1).to(device)
-                    batch_data = batch_data.to(self.device)
-                    batch_labels = batch_labels.to(self.device)
+                # Forward pass: compute embeddings
+                embeddings = self.model(batch_data.float())
 
-                    # Forward pass: compute embeddings
-                    embeddings = self.model(batch_data.float())
+                # Compute prototypical center loss
+                loss = self.pre_criterion(embeddings, batch_labels)
 
-                    # Compute prototypical center loss
-                    loss = self.pre_criterion(embeddings, batch_labels)
+                # Backpropagation and optimization
+                self.pre_optimizer.zero_grad()
+                loss.backward()
+                self.pre_optimizer.step()
 
-                    # Backpropagation and optimization
-                    self.pre_optimizer.zero_grad()
-                    loss.backward()
-                    self.pre_optimizer.step()
+                running_loss += loss.item()
 
-                    running_loss += loss.item()
-
-                # fl.log(f'Pretrain Epoch [{epoch+1}/{num_epochs}], Loss: {running_loss/len(dataloader):.4f}')
+            # fl.log(f'Pretrain Epoch [{epoch+1}/{num_epochs}], Loss: {running_loss/len(dataloader):.4f}')
 
 
     def generate_pairs(self, X, Y, N):
-        try:
-            # Ensure N is even
-            if N % 2 != 0:
-                raise ValueError("N must be an even number.")
+        # Ensure N is even
+        if N % 2 != 0:
+            raise ValueError("N must be an even number.")
 
-            num_same_label_pairs = N // 2
-            num_different_label_pairs = N // 2
+        num_same_label_pairs = N // 2
+        num_different_label_pairs = N // 2
 
-            # Precompute label indices
-            label_to_indices = {label.item(): (Y == label).nonzero(as_tuple=True)[0].tolist() for label in torch.unique(Y)}
+        # Precompute label indices
+        label_to_indices = {label.item(): (Y == label).nonzero(as_tuple=True)[0].tolist() for label in torch.unique(Y)}
 
-            X1, X2, labels = [], [], []
+        X1, X2, labels = [], [], []
 
-            # Generate similar pairs (same label)
-            for _ in range(num_same_label_pairs):
-                # Sample a label that has more than one instance
-                while True:
-                    sampled_label = random.choice(list(label_to_indices.keys()))
-                    indices = label_to_indices[sampled_label]
-                    if len(indices) > 1:
-                        # Randomly sample two distinct indices for the same label
-                        idx1, idx2 = random.sample(indices, 2)
-                        X1.append(X[idx1])
-                        X2.append(X[idx2])
-                        labels.append(1)  # Similar pair label
-                        # Ensure the label has more than one element
-                        break
-
-            # Generate dissimilar pairs (different labels)
-            for _ in range(num_different_label_pairs):
-                # Sample two different labels
-                while len(list(label_to_indices.keys())) >= 2:
-
-                    label1, label2 = random.sample(list(label_to_indices.keys()), 2)
-                    idx1 = random.choice(label_to_indices[label1])
-                    idx2 = random.choice(label_to_indices[label2])
-                    # Directly add the dissimilar pairs
+        # Generate similar pairs (same label)
+        for _ in range(num_same_label_pairs):
+            # Sample a label that has more than one instance
+            while True:
+                sampled_label = random.choice(list(label_to_indices.keys()))
+                indices = label_to_indices[sampled_label]
+                if len(indices) > 1:
+                    # Randomly sample two distinct indices for the same label
+                    idx1, idx2 = random.sample(indices, 2)
                     X1.append(X[idx1])
                     X2.append(X[idx2])
-                    labels.append(0)  # Dissimilar pair label
+                    labels.append(1)  # Similar pair label
+                    # Ensure the label has more than one element
                     break
 
-            # Convert lists to tensors efficiently in one go
-            X1 = torch.stack(X1)
-            X2 = torch.stack(X2)
-            labels = torch.tensor(labels)
+        # Generate dissimilar pairs (different labels)
+        for _ in range(num_different_label_pairs):
+            # Sample two different labels
+            while len(list(label_to_indices.keys())) >= 2:
 
-            return X1, X2, labels
-        except Exception as e:
-            fl.log(f"Error in generate_pairs(): {e}")
-            return torch.tensor([]), torch.tensor([]), torch.tensor([])
+                label1, label2 = random.sample(list(label_to_indices.keys()), 2)
+                idx1 = random.choice(label_to_indices[label1])
+                idx2 = random.choice(label_to_indices[label2])
+                # Directly add the dissimilar pairs
+                X1.append(X[idx1])
+                X2.append(X[idx2])
+                labels.append(0)  # Dissimilar pair label
+                break
+
+        # Convert lists to tensors efficiently in one go
+        X1 = torch.stack(X1)
+        X2 = torch.stack(X2)
+        labels = torch.tensor(labels)
+
+        return X1, X2, labels
 
     # Training loop with dynamic learning rate adjustment
     def train_model_with_dynamic_lr(self, train_loader, optimizer, num_epochs, frozen=False):
-        try:
-            scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=self.lr_step, gamma=self.lr_gamma)  # Reduce LR by 0.5 every 50 epochs
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=self.lr_step, gamma=self.lr_gamma)  # Reduce LR by 0.5 every 50 epochs
 
-            for epoch in range(num_epochs):
-                self.model.train()
-                running_loss = 0.0
+        for epoch in range(num_epochs):
+            self.model.train()
+            running_loss = 0.0
 
-                for batch_data, batch_labels in train_loader:
-                    batch_data = batch_data.to(self.device)
-                    batch_labels = batch_labels.to(self.device)
+            for batch_data, batch_labels in train_loader:
+                batch_data = batch_data.to(self.device)
+                batch_labels = batch_labels.to(self.device)
 
-                    optimizer.zero_grad()
+                optimizer.zero_grad()
 
-                    # Create pairs of samples and labels (1 for similar, 0 for dissimilar)
-                    # pairs, labels = create_pairs(batch_data, batch_labels)
-                    if True:
-                        pairs_1, pairs_2, labels = self.generate_pairs(batch_data, batch_labels, 200)
-                        pairs_1, pairs_2, labels = pairs_1.to(self.device), pairs_2.to(self.device), labels.to(self.device)
+                # Create pairs of samples and labels (1 for similar, 0 for dissimilar)
+                # pairs, labels = create_pairs(batch_data, batch_labels)
+                if True:
+                    pairs_1, pairs_2, labels = self.generate_pairs(batch_data, batch_labels, 200)
+                    pairs_1, pairs_2, labels = pairs_1.to(self.device), pairs_2.to(self.device), labels.to(self.device)
 
-                    # Compute embeddings using the frozen encoder
-                    if frozen:
-                        with torch.no_grad():
-                            # Compute embeddings for both elements of the pairs
-                            embeddings_x1 = self.model(pairs_1.float())
-                            embeddings_x2 = self.model(pairs_2.float())
-                            self.criterion.toggle_requires_grad(requires_grad_value=False)
-
-                    else:
+                # Compute embeddings using the frozen encoder
+                if frozen:
+                    with torch.no_grad():
                         # Compute embeddings for both elements of the pairs
                         embeddings_x1 = self.model(pairs_1.float())
                         embeddings_x2 = self.model(pairs_2.float())
-                        self.criterion.toggle_requires_grad(requires_grad_value=True)
+                        self.criterion.toggle_requires_grad(requires_grad_value=False)
 
-                    # Compute loss
-                    loss = self.criterion(embeddings_x1, embeddings_x2, labels)
+                else:
+                    # Compute embeddings for both elements of the pairs
+                    embeddings_x1 = self.model(pairs_1.float())
+                    embeddings_x2 = self.model(pairs_2.float())
+                    self.criterion.toggle_requires_grad(requires_grad_value=True)
 
-                    # Backpropagation and optimization
+                # Compute loss
+                loss = self.criterion(embeddings_x1, embeddings_x2, labels)
 
-                    loss.backward()
-                    optimizer.step()
+                # Backpropagation and optimization
 
-                    running_loss += loss.item()
+                loss.backward()
+                optimizer.step()
 
-                scheduler.step()
-                return running_loss/len(train_loader)
-        except Exception as e:
-            fl.log(f"Error in train_model_with_dynamic_lr(): {e}")
-            return 0.0
-            # print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {running_loss/len(train_loader):.4f}, LR: {scheduler.get_last_lr()[0]:.6f}')
+                running_loss += loss.item()
+
+            scheduler.step()
+            return running_loss/len(train_loader)
 
     def training_loop(self, data_loaders):
-        try:
-            train_loader, _ = data_loaders
-            self.pretrain_model_prototypical_center(train_loader, 2)
-            loss_avg1 = self.train_model_with_dynamic_lr(train_loader, self.optimizer1, self.epochs)
-            loss_avg2 = self.train_model_with_dynamic_lr(train_loader, self.optimizer2, self.epochs)
-            return (loss_avg1 + loss_avg2) / 2, {}
-        except Exception as e:
-            fl.log(f"Error in training loop: {e}")
+        train_loader, _ = data_loaders
+        self.pretrain_model_prototypical_center(train_loader, 2)
+        loss_avg1 = self.train_model_with_dynamic_lr(train_loader, self.optimizer1, self.epochs)
+        loss_avg2 = self.train_model_with_dynamic_lr(train_loader, self.optimizer2, self.epochs)
+        return (loss_avg1 + loss_avg2) / 2, {}
 
 ################################
 # TESTING  FUNCTIONS ######
 ################################
 
     def knn_in_embedding_space(self, train_loader, test_loader, k=1, num_samples_for_pairs=20):
+        self.model.eval()
 
-            self.model.eval()
+        # Collect train embeddings and labels
+        train_embeddings = []
+        train_labels = []
 
-            # Collect train embeddings and labels
-            train_embeddings = []
-            train_labels = []
+        with torch.no_grad():
+            for batch_data, batch_labels in train_loader:
+                # batch_data = batch_data.view(batch_data.size(0), -1).to(self.device)
+                batch_data = batch_data.to(self.device)
+                embeddings = self.model(batch_data)
+                train_embeddings.append(embeddings.cpu())
+                train_labels.append(batch_labels)
 
-            with torch.no_grad():
-                for batch_data, batch_labels in train_loader:
-                    # batch_data = batch_data.view(batch_data.size(0), -1).to(self.device)
-                    batch_data = batch_data.to(self.device)
-                    embeddings = self.model(batch_data)
-                    train_embeddings.append(embeddings.cpu())
-                    train_labels.append(batch_labels)
+        train_embeddings = torch.cat(train_embeddings).cpu().numpy()
+        train_labels = torch.cat(train_labels).cpu().numpy()
 
-            train_embeddings = torch.cat(train_embeddings).cpu().numpy()
-            train_labels = torch.cat(train_labels).cpu().numpy()
+        # Initialize the k-NN classifier
+        knn = KNeighborsClassifier(n_neighbors=k)
+        knn.fit(train_embeddings, train_labels)
 
-            # Initialize the k-NN classifier
-            knn = KNeighborsClassifier(n_neighbors=k)
-            knn.fit(train_embeddings, train_labels)
+        # Store predictions, true labels, and loss values
+        all_preds = []
+        all_labels = []
+        running_loss = 0.0
+        total_batches = 0
 
-            # Store predictions, true labels, and loss values
-            all_preds = []
-            all_labels = []
-            running_loss = 0.0
-            total_batches = 0
+        with torch.no_grad():
+            for batch_data, batch_labels in test_loader:
+                # batch_data = batch_data.view(batch_data.size(0), -1).to(self.device)
+                batch_data = batch_data.to(self.device)
+                embeddings = self.model(batch_data).cpu().numpy()
 
-            with torch.no_grad():
-                for batch_data, batch_labels in test_loader:
-                    # batch_data = batch_data.view(batch_data.size(0), -1).to(self.device)
-                    batch_data = batch_data.to(self.device)
-                    embeddings = self.model(batch_data).cpu().numpy()
+                # Perform k-NN classification in embedding space
+                predicted_labels = knn.predict(embeddings)
 
-                    # Perform k-NN classification in embedding space
-                    predicted_labels = knn.predict(embeddings)
+                # Store predictions and true labels
+                all_preds.extend(predicted_labels)
+                all_labels.extend(batch_labels.cpu().numpy())
 
-                    # Store predictions and true labels
-                    all_preds.extend(predicted_labels)
-                    all_labels.extend(batch_labels.cpu().numpy())
+                # Compute loss based on pairs in the test set
 
-                    # Compute loss based on pairs in the test set
+                # Generate pairs for loss computation
+                pairs_1, pairs_2, labels = self.generate_pairs(batch_data, batch_labels, num_samples_for_pairs)
+                pairs_1, pairs_2, labels = pairs_1.to(self.device), pairs_2.to(self.device), labels.to(self.device)
 
-                    # Generate pairs for loss computation
-                    pairs_1, pairs_2, labels = self.generate_pairs(batch_data, batch_labels, num_samples_for_pairs)
-                    pairs_1, pairs_2, labels = pairs_1.to(self.device), pairs_2.to(self.device), labels.to(self.device)
+                # Compute embeddings for pairs
+                embeddings_x1 = self.model(pairs_1)
+                embeddings_x2 = self.model(pairs_2)
 
-                    # Compute embeddings for pairs
-                    embeddings_x1 = self.model(pairs_1)
-                    embeddings_x2 = self.model(pairs_2)
+                # Compute loss
+                loss = self.criterion(embeddings_x1, embeddings_x2, labels)
+                running_loss += loss
+                total_batches += 1
 
-                    # Compute loss
-                    loss = self.criterion(embeddings_x1, embeddings_x2, labels)
-                    running_loss += loss
-                    total_batches += 1
+        # Average loss over all batches
+        if total_batches > 0:
+            avg_loss = running_loss / total_batches
+        else:
+            avg_loss = 0.0
 
-            # Average loss over all batches
-            if total_batches > 0:
-                avg_loss = running_loss / total_batches
-            else:
-                avg_loss = 0.0
+        print(f'Average loss on test set: {avg_loss:.4f}')
 
-            print(f'Average loss on test set: {avg_loss:.4f}')
+        # Convert predictions and true labels to tensors for consistency
+        y_pred = torch.tensor(all_preds)
+        y_label = torch.tensor(all_labels)
 
-            # Convert predictions and true labels to tensors for consistency
-            y_pred = torch.tensor(all_preds)
-            y_label = torch.tensor(all_labels)
-
-            return avg_loss, y_pred, y_label
+        return avg_loss, y_pred, y_label
 
 
     def test(self, trainloader, testloader):
+        loss = 0.0
+        self.model.to(self.device)
+        self.model.eval()
 
-            loss = 0.0
-            self.model.to(self.device)
-            self.model.eval()
+        accuracy = MulticlassAccuracy(num_classes=self.num_classes, average='macro').to(self.device)
+        precision = MulticlassPrecision(num_classes=self.num_classes, average='macro').to(self.device)
+        recall = MulticlassRecall(num_classes=self.num_classes, average='macro').to(self.device)
+        f1 = MulticlassF1Score(num_classes=self.num_classes, average='macro').to(self.device)
+        conf_matrix = MulticlassConfusionMatrix(num_classes=self.num_classes).to(self.device)
 
-            accuracy = MulticlassAccuracy(num_classes=self.num_classes, average='macro').to(self.device)
-            precision = MulticlassPrecision(num_classes=self.num_classes, average='macro').to(self.device)
-            recall = MulticlassRecall(num_classes=self.num_classes, average='macro').to(self.device)
-            f1 = MulticlassF1Score(num_classes=self.num_classes, average='macro').to(self.device)
-            conf_matrix = MulticlassConfusionMatrix(num_classes=self.num_classes).to(self.device)
+        loss, predicted, label = self.knn_in_embedding_space(trainloader, testloader)
+        predicted = torch.tensor(predicted).to(self.device)
+        label = torch.tensor(label).to(self.device)
 
-            loss, predicted, label = self.knn_in_embedding_space(trainloader, testloader)
-            predicted = torch.tensor(predicted).to(self.device)
-            label = torch.tensor(label).to(self.device)
+        accuracy.update(predicted, label)
+        precision.update(predicted, label)
+        recall.update(predicted, label)
+        f1.update(predicted, label)
+        conf_matrix.update(predicted, label)
 
-            accuracy.update(predicted, label)
-            precision.update(predicted, label)
-            recall.update(predicted, label)
-            f1.update(predicted, label)
-            conf_matrix.update(predicted, label)
+        acc = accuracy.compute().item()
+        prec = precision.compute().item()
+        rec = recall.compute().item()
+        f1_score = f1.compute().item()
+        conf = conf_matrix.compute().cpu().numpy()
 
-            acc = accuracy.compute().item()
-            prec = precision.compute().item()
-            rec = recall.compute().item()
-            f1_score = f1.compute().item()
-            conf = conf_matrix.compute().cpu().numpy()
-
-            return float(loss), acc, prec, rec, f1_score, conf
+        return float(loss), acc, prec, rec, f1_score, conf
 
 
     def validation_loop(self, data_loaders):
-
-            train_loader, test_loader = data_loaders
-            loss_avg, acc, prec, rec, f1, conf_matrix = self.test(train_loader, test_loader)
-            return loss_avg, {
-                "TEST_ACC": acc,
-                "TEST_PREC": prec,
-                "Recall": rec,
-                "TEST_F1": f1,
-                # "TEST_CONF": str(conf_matrix),
-            }
+        train_loader, test_loader = data_loaders
+        loss_avg, acc, prec, rec, f1, conf_matrix = self.test(train_loader, test_loader)
+        return loss_avg, {
+            "TEST_ACC": acc,
+            "TEST_PREC": prec,
+            "Recall": rec,
+            "TEST_F1": f1,
+            # "TEST_CONF": str(conf_matrix),
+        }
 
