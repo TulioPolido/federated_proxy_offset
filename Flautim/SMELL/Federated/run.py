@@ -13,7 +13,7 @@ from torch.utils.data import random_split
 DATASET = "PAMAP"
 NUM_CHANNELS = 6
 BATCH_SIZE = 32
-NUM_ROUNDS = 50
+NUM_ROUNDS = 100
 NUM_EPOCHS = 2
 EMB_DIM = 64
 

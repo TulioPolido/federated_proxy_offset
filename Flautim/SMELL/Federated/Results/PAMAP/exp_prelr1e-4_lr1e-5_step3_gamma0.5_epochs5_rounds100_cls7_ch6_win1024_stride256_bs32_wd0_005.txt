@@ -1,0 +1,62 @@
+=== Experiment Parameters ===
+exp
+prelr 1e-4
+lr 1e-5
+step 3
+gamma 0.5
+epochs 5
+rounds 100
+cls 7
+ch 6
+win 1024
+stride 256
+bs 32
+wd 0
+005
+
+=== Best Epoch Results per Experiment (averaged across users) ===
+
+Experiment A - User 0:
+Balanced Accuracy: 0.7484852075576782
+Precision: 0.7855159044265747
+F1 Score: 0.7251611351966858
+
+Experiment A - User 1:
+Balanced Accuracy: 0.8730972409248352
+Precision: 0.8770988583564758
+F1 Score: 0.870434045791626
+
+Experiment A - User 2:
+Balanced Accuracy: 0.7466925382614136
+Precision: 0.7154706716537476
+F1 Score: 0.7242615222930908
+
+Experiment A - User 3:
+Balanced Accuracy: 0.7180603742599487
+Precision: 0.6884049773216248
+F1 Score: 0.6931004524230957
+
+Experiment A - User 4:
+Balanced Accuracy: 0.8485050797462463
+Precision: 0.8584383726119995
+F1 Score: 0.8395934104919434
+
+Experiment A - User 5:
+Balanced Accuracy: 0.8647557497024536
+Precision: 0.8756585121154785
+F1 Score: 0.8610005378723145
+
+Experiment A - User 6:
+Balanced Accuracy: 0.738096296787262
+Precision: 0.745779275894165
+F1 Score: 0.7110835909843445
+
+Experiment A (Averaged across users):
+Balanced Accuracy: 0.7911
+Precision: 0.7923
+F1 Score: 0.7749
+
+=== Average Across Experiments (user-averaged) ===
+Average Balanced Accuracy: 0.7911
+Average Precision: 0.7923
+Average F1 Score: 0.7749
