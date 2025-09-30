@@ -9,10 +9,10 @@ import flautim as fl
 import torch
 import random
 
-DATASET = "PAMAP"
+DATASET = "WISDM"
 NUM_CHANNELS = 6
 BATCH_SIZE = 32
-NUM_ROUNDS = 10
+NUM_ROUNDS = 50
 NUM_EPOCHS = 2
 EMB_DIM = 64
 
@@ -32,8 +32,8 @@ def generate_server_fn(context, eval_fn=None):
             strategy = flwr.server.strategy.FedAvg(
                 initial_parameters=params,
                 evaluate_metrics_aggregation_fn=weighted_average,
-                fraction_fit=0.5,
-                fraction_evaluate=1.0,
+                fraction_fit=FRACTION_FIT,
+                fraction_evaluate=FRACTION_EVALUATE,
                 evaluate_fn=eval_fn,
                 on_fit_config_fn=fit_config,
                 on_evaluate_config_fn=fit_config,
@@ -56,10 +56,12 @@ def generate_client_fn(context, files, test_file):
                 context, emb_dim=EMB_DIM, num_channels=NUM_CHANNELS, suffix=cid
             )
 
+            
+
             dataset = SmellRecurrenceDataset.RecurrenceDataset(
                 train_file=file,
                 test_file=test_file,
-                augment_multiplier=2,
+                augment_multiplier=AUGMENT,
                 use_crop=False,
                 use_erase=False,
                 use_jitter=False,
@@ -113,6 +115,9 @@ if __name__ == "__main__":
             LEARNING_RATE_STEP = 3
             LEARNING_RATE_GAMMA = 0.5
             WEIGHT_DECAY = 6.7e-5
+            AUGMENT = 2
+            FRACTION_FIT = 0.5
+            FRACTION_EVALUATE = 0.5
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
@@ -148,16 +153,19 @@ if __name__ == "__main__":
             NUM_CLASSES = 5
             WINDOW_SIZE = 256
             STRIDE = 64
-            PRE_TRAIN_LEARNING_RATE = 5e-5
+            PRE_TRAIN_LEARNING_RATE = 1e-4
             LEARNING_RATE = 1e-5
             LEARNING_RATE_STEP = 3
             LEARNING_RATE_GAMMA = 0.5
             WEIGHT_DECAY = 1.1e-5
+            AUGMENT = 0
+            FRACTION_FIT = 0.1
+            FRACTION_EVALUATE = 0.5
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
             # Shuffle and split
-            test_files = [random.sample(all_files, TEST_USERS)]
+            test_files = random.sample(all_files, TEST_USERS)
             train_files = [f for f in all_files if f not in test_files]
             fl.log(f"Train users: {train_files}")
             fl.log(f"Test users: {test_files}")

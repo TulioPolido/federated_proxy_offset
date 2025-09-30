@@ -7,7 +7,6 @@ from torch.optim.lr_scheduler import StepLR
 from torchmetrics.classification import MulticlassAccuracy, MulticlassPrecision, MulticlassRecall, MulticlassF1Score, MulticlassConfusionMatrix
 from sklearn.neighbors import KNeighborsClassifier
 import flautim as fl
-import numpy as np
 import copy
 
 ###############################
@@ -187,97 +186,94 @@ class LearnablePrototypicalLossWithDiversityRegularization(nn.Module):
 
 class RecurrenceExperiment(Experiment):
     def __init__(
-            self,
-            model,
-            dataset,
-            context,
-            lr=0.001,
-            pre_train_lr=0.001,
-            epochs=10,
-            weight_decay=1e-4,
-            lr_step=3,
-            lr_gamma=0.5,
-            num_classes=7,
-            embedding_size=64,
-            margin=1.0,
-            # pre_train=False,
-            **kwargs
-            ):
-        
-            super(RecurrenceExperiment, self)\
-                .__init__(model, dataset, context, **kwargs)
+        self,
+        model,
+        dataset,
+        context,
+        lr=0.001,
+        pre_train_lr=0.001,
+        epochs=10,
+        weight_decay=1e-4,
+        lr_step=3,
+        lr_gamma=0.5,
+        num_classes=7,
+        embedding_size=64,
+        margin=1.0,
+        # pre_train=False,
+        **kwargs
+    ):
+        super(RecurrenceExperiment, self)\
+            .__init__(model, dataset, context, **kwargs)
 
-            # self.pre_train = pre_train
-            self.epochs = epochs
-            self.num_classes = num_classes
-            self.margin = margin
-            self.embedding_size = embedding_size
-            self.lr = lr
-            self.pre_train_lr = pre_train_lr
-            self.lr_step = lr_step
-            self.lr_gamma = lr_gamma
-            self.weight_decay = weight_decay
+        # self.pre_train = pre_train
+        self.epochs = epochs
+        self.num_classes = num_classes
+        self.margin = margin
+        self.embedding_size = embedding_size
+        self.lr = lr
+        self.pre_train_lr = pre_train_lr
+        self.lr_step = lr_step
+        self.lr_gamma = lr_gamma
+        self.weight_decay = weight_decay
 
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            self.model.to(self.device)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model.to(self.device)
 
-            self.criterion = LearnablePrototypicalLossWithDiversityRegularization(
-                embedding_dim=self.embedding_size,
-                num_similar_prototypes=2,
-                num_dissimilar_prototypes=2
-            ).to(self.device)
-            self.optimizer1 = torch.optim.Adam(
-                list(self.criterion.parameters()),
-                lr=self.lr
-            )
-            self.optimizer2 = torch.torch.optim.SGD(
-                [{'params': self.model.parameters(), 'lr': self.lr}]
-                + [{'params': self.criterion.parameters(), 'lr': self.lr}]
-            )
-            self.pre_criterion = PrototypicalCenterLoss(
-                num_classes=self.num_classes,
-                embedding_size=self.embedding_size,
-                margin=self.margin
-            ).to(self.device)
-            self.pre_optimizer = torch.optim.Adam(
-                list(model.parameters()) + list(self.pre_criterion.parameters()),
-                lr=self.pre_train_lr
-            )
+        self.criterion = LearnablePrototypicalLossWithDiversityRegularization(
+            embedding_dim=self.embedding_size,
+            num_similar_prototypes=2,
+            num_dissimilar_prototypes=2
+        ).to(self.device)
+        self.optimizer1 = torch.optim.Adam(
+            list(self.criterion.parameters()),
+            lr=self.lr
+        )
+        self.optimizer2 = torch.torch.optim.SGD(
+            [{'params': self.model.parameters(), 'lr': self.lr}]
+            + [{'params': self.criterion.parameters(), 'lr': self.lr}]
+        )
+        self.pre_criterion = PrototypicalCenterLoss(
+            num_classes=self.num_classes,
+            embedding_size=self.embedding_size,
+            margin=self.margin
+        ).to(self.device)
+        self.pre_optimizer = torch.optim.Adam(
+            list(model.parameters()) + list(self.pre_criterion.parameters()),
+            lr=self.pre_train_lr
+        )
 
-            self.scheduler = StepLR(self.optimizer1, step_size=lr_step, gamma=lr_gamma)
+        self.scheduler = StepLR(self.optimizer1, step_size=lr_step, gamma=lr_gamma)
 
 
 ################################
 # TRAINING FUNCTIONS ######
 ################################
 
-    # Modify the pretrain function to use prototypical center loss
     def pretrain_model_prototypical_center(self, model, dataloader, num_epochs):
 
-            model.train()  # Set the model to training mode
+        model.train()  # Set the model to training mode
 
-            for epoch in range(num_epochs):
-                running_loss = 0.0
-                for batch_data, batch_labels in dataloader:
-                    # batch_data = batch_data.view(batch_data.size(0), -1).to(device)
-                    batch_data = batch_data.to(self.device)
-                    batch_labels = batch_labels.to(self.device)
+        for epoch in range(num_epochs):
+            running_loss = 0.0
+            for batch_data, batch_labels in dataloader:
+                # batch_data = batch_data.view(batch_data.size(0), -1).to(device)
+                batch_data = batch_data.to(self.device)
+                batch_labels = batch_labels.to(self.device)
 
-                    # Forward pass: compute embeddings
-                    embeddings = model(batch_data.float())
+                # Forward pass: compute embeddings
+                embeddings = model(batch_data.float())
 
-                    # Compute prototypical center loss
-                    loss = self.pre_criterion(embeddings, batch_labels)
+                # Compute prototypical center loss
+                loss = self.pre_criterion(embeddings, batch_labels)
 
-                    # Backpropagation and optimization
-                    self.pre_optimizer.zero_grad()
-                    loss.backward()
-                    self.pre_optimizer.step()
+                # Backpropagation and optimization
+                self.pre_optimizer.zero_grad()
+                loss.backward()
+                self.pre_optimizer.step()
 
-                    running_loss += loss.item()
+                running_loss += loss.item()
 
-                # fl.log(f'Pretrain Epoch [{epoch+1}/{num_epochs}], Loss: {running_loss/len(dataloader):.4f}')
-
+            # fl.log(f'Pretrain Epoch [{epoch+1}/{num_epochs}], Loss: {running_loss/len(dataloader):.4f}')
 
     def generate_pairs(self, X, Y, N):
         try:
@@ -406,7 +402,7 @@ class RecurrenceExperiment(Experiment):
         # === Outer loop: compute query loss on adapted model ===
         adapted_model.eval()
 
-        #TODO: Finish the code
+        # TODO: Finish the code
         loss_q, _, _ = self.knn_in_embedding_space(support_loader, query_loader)
 
         # x_q, y_q = next(iter(query_loader))
@@ -432,105 +428,103 @@ class RecurrenceExperiment(Experiment):
 
     def knn_in_embedding_space(self, model, train_loader, test_loader, k=1, num_samples_for_pairs=20):
 
-            model.eval()
+        model.eval()
 
-            # Collect train embeddings and labels
-            train_embeddings = []
-            train_labels = []
+        # Collect train embeddings and labels
+        train_embeddings = []
+        train_labels = []
 
-            with torch.no_grad():
-                for batch_data, batch_labels in train_loader:
-                    # batch_data = batch_data.view(batch_data.size(0), -1).to(self.device)
-                    batch_data = batch_data.to(self.device)
-                    embeddings = model(batch_data)
-                    train_embeddings.append(embeddings.cpu())
-                    train_labels.append(batch_labels)
+        with torch.no_grad():
+            for batch_data, batch_labels in train_loader:
+                # batch_data = batch_data.view(batch_data.size(0), -1).to(self.device)
+                batch_data = batch_data.to(self.device)
+                embeddings = model(batch_data)
+                train_embeddings.append(embeddings.cpu())
+                train_labels.append(batch_labels)
 
-            train_embeddings = torch.cat(train_embeddings).cpu().numpy()
-            train_labels = torch.cat(train_labels).cpu().numpy()
+        train_embeddings = torch.cat(train_embeddings).cpu().numpy()
+        train_labels = torch.cat(train_labels).cpu().numpy()
 
-            # Initialize the k-NN classifier
-            knn = KNeighborsClassifier(n_neighbors=k)
-            knn.fit(train_embeddings, train_labels)
+        # Initialize the k-NN classifier
+        knn = KNeighborsClassifier(n_neighbors=k)
+        knn.fit(train_embeddings, train_labels)
 
-            # Store predictions, true labels, and loss values
-            all_preds = []
-            all_labels = []
-            running_loss = 0.0
-            total_batches = 0
+        # Store predictions, true labels, and loss values
+        all_preds = []
+        all_labels = []
+        running_loss = 0.0
+        total_batches = 0
 
-            with torch.no_grad():
-                for batch_data, batch_labels in test_loader:
-                    # batch_data = batch_data.view(batch_data.size(0), -1).to(self.device)
-                    batch_data = batch_data.to(self.device)
-                    embeddings = model(batch_data).cpu().numpy()
+        with torch.no_grad():
+            for batch_data, batch_labels in test_loader:
+                # batch_data = batch_data.view(batch_data.size(0), -1).to(self.device)
+                batch_data = batch_data.to(self.device)
+                embeddings = model(batch_data).cpu().numpy()
 
-                    # Perform k-NN classification in embedding space
-                    predicted_labels = knn.predict(embeddings)
+                # Perform k-NN classification in embedding space
+                predicted_labels = knn.predict(embeddings)
 
-                    # Store predictions and true labels
-                    all_preds.extend(predicted_labels)
-                    all_labels.extend(batch_labels.cpu().numpy())
+                # Store predictions and true labels
+                all_preds.extend(predicted_labels)
+                all_labels.extend(batch_labels.cpu().numpy())
 
-                    # Compute loss based on pairs in the test set
+                # Compute loss based on pairs in the test set
 
-                    # Generate pairs for loss computation
-                    pairs_1, pairs_2, labels = self.generate_pairs(batch_data, batch_labels, num_samples_for_pairs)
-                    pairs_1, pairs_2, labels = pairs_1.to(self.device), pairs_2.to(self.device), labels.to(self.device)
+                # Generate pairs for loss computation
+                pairs_1, pairs_2, labels = self.generate_pairs(batch_data, batch_labels, num_samples_for_pairs)
+                pairs_1, pairs_2, labels = pairs_1.to(self.device), pairs_2.to(self.device), labels.to(self.device)
 
-                    # Compute embeddings for pairs
-                    embeddings_x1 = model(pairs_1)
-                    embeddings_x2 = model(pairs_2)
+                # Compute embeddings for pairs
+                embeddings_x1 = model(pairs_1)
+                embeddings_x2 = model(pairs_2)
 
-                    # Compute loss
-                    loss = self.criterion(embeddings_x1, embeddings_x2, labels)
-                    running_loss += loss
-                    total_batches += 1
+                # Compute loss
+                loss = self.criterion(embeddings_x1, embeddings_x2, labels)
+                running_loss += loss
+                total_batches += 1
 
-            # Average loss over all batches
-            if total_batches > 0:
-                avg_loss = running_loss / total_batches
-            else:
-                avg_loss = 0.0
+        # Average loss over all batches
+        if total_batches > 0:
+            avg_loss = running_loss / total_batches
+        else:
+            avg_loss = 0.0
 
-            print(f'Average loss on test set: {avg_loss:.4f}')
+        print(f'Average loss on test set: {avg_loss:.4f}')
 
-            # Convert predictions and true labels to tensors for consistency
-            y_pred = torch.tensor(all_preds)
-            y_label = torch.tensor(all_labels)
+        # Convert predictions and true labels to tensors for consistency
+        y_pred = torch.tensor(all_preds)
+        y_label = torch.tensor(all_labels)
 
-            return avg_loss, y_pred, y_label
-
+        return avg_loss, y_pred, y_label
 
     def test(self, trainloader, testloader):
-            loss = 0.0
-            self.model.to(self.device)
-            self.model.eval()
+        loss = 0.0
+        self.model.to(self.device)
+        self.model.eval()
 
-            accuracy = MulticlassAccuracy(num_classes=self.num_classes, average='macro').to(self.device)
-            precision = MulticlassPrecision(num_classes=self.num_classes, average='macro').to(self.device)
-            recall = MulticlassRecall(num_classes=self.num_classes, average='macro').to(self.device)
-            f1 = MulticlassF1Score(num_classes=self.num_classes, average='macro').to(self.device)
-            conf_matrix = MulticlassConfusionMatrix(num_classes=self.num_classes).to(self.device)
+        accuracy = MulticlassAccuracy(num_classes=self.num_classes, average='macro').to(self.device)
+        precision = MulticlassPrecision(num_classes=self.num_classes, average='macro').to(self.device)
+        recall = MulticlassRecall(num_classes=self.num_classes, average='macro').to(self.device)
+        f1 = MulticlassF1Score(num_classes=self.num_classes, average='macro').to(self.device)
+        conf_matrix = MulticlassConfusionMatrix(num_classes=self.num_classes).to(self.device)
 
-            loss, predicted, label = self.knn_in_embedding_space(self.model, trainloader, testloader)
-            predicted = torch.tensor(predicted).to(self.device)
-            label = torch.tensor(label).to(self.device)
+        loss, predicted, label = self.knn_in_embedding_space(self.model, trainloader, testloader)
+        predicted = torch.tensor(predicted).to(self.device)
+        label = torch.tensor(label).to(self.device)
 
-            accuracy.update(predicted, label)
-            precision.update(predicted, label)
-            recall.update(predicted, label)
-            f1.update(predicted, label)
-            conf_matrix.update(predicted, label)
+        accuracy.update(predicted, label)
+        precision.update(predicted, label)
+        recall.update(predicted, label)
+        f1.update(predicted, label)
+        conf_matrix.update(predicted, label)
 
-            acc = accuracy.compute().item()
-            prec = precision.compute().item()
-            rec = recall.compute().item()
-            f1_score = f1.compute().item()
-            conf = conf_matrix.compute().cpu().numpy()
+        acc = accuracy.compute().item()
+        prec = precision.compute().item()
+        rec = recall.compute().item()
+        f1_score = f1.compute().item()
+        conf = conf_matrix.compute().cpu().numpy()
 
-            return float(loss), acc, prec, rec, f1_score, conf
-
+        return float(loss), acc, prec, rec, f1_score, conf
 
     def validation_loop(self, data_loaders):
         train_loader, test_loader = data_loaders
@@ -540,7 +534,5 @@ class RecurrenceExperiment(Experiment):
             "TEST_ACC": acc,
             "TEST_PREC": prec,
             "Recall": rec,
-            "TEST_F1": f1,
-            # "TEST_CONF": str(conf_matrix),
+            "TEST_F1": f1
     }
-
