@@ -67,58 +67,41 @@ class RecurrenceDataset(Dataset):
         return img_tensor
 
     def dataloader(self, validation=False):
-        if not validation:
-            train_set = self.train()
+        train_set = self.train()
+        test_set = self.validation()
 
-            # Apply augmentation only on training set
-            if self.augment_multiplier > 0:
-                augmented_data = []
-                augmented_labels = []
+        # Apply augmentation only if not in validation mode
+        if not validation and self.augment_multiplier > 0:
+            augmented_data = []
+            augmented_labels = []
 
-                for i in range(len(train_set.data)):
-                    img = train_set.data[i]
-                    label = train_set.labels[i]
+            for img, label in zip(train_set.data, train_set.labels):
+                # keep original
+                augmented_data.append(img.clone())
+                augmented_labels.append(label.clone())
 
-                    # keep original
-                    augmented_data.append(img.clone())
+                # add augmented versions
+                for _ in range(self.augment_multiplier):
+                    augmented_data.append(self._augment_image(img.clone()))
                     augmented_labels.append(label.clone())
 
-                    # add augmented versions
-                    for _ in range(self.augment_multiplier):
-                        aug_img = self._augment_image(img.clone())
-                        augmented_data.append(aug_img)
-                        augmented_labels.append(label.clone())
+            train_set.data = torch.stack(augmented_data)
+            train_set.labels = torch.stack(augmented_labels)
 
-                train_set.data = torch.stack(augmented_data)
-                train_set.labels = torch.stack(augmented_labels)
+        train_loader = DataLoader(
+            train_set,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+        )
+        test_loader = DataLoader(
+            test_set,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+        )
 
-            return [
-                DataLoader(
-                    train_set,
-                    batch_size=self.batch_size,
-                    shuffle=True,
-                    num_workers=self.num_workers,
-                ),
-                None,
-            ]
-
-        else:
-            train_set = self.train()
-            test_set = self.validation()
-
-            train_loader = DataLoader(
-                train_set,
-                batch_size=self.batch_size,
-                shuffle=True,
-                num_workers=self.num_workers,
-            )
-            test_loader = DataLoader(
-                test_set,
-                batch_size=self.batch_size,
-                shuffle=False,
-                num_workers=self.num_workers,
-            )
-            return [train_loader, test_loader]
+        return [train_loader, test_loader]
 
     def train(self) -> Dataset:
         train = copy.deepcopy(self)

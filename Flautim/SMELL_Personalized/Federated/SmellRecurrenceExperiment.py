@@ -218,6 +218,7 @@ class RecurrenceExperiment(Experiment):
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
+        self.adapted_model = copy.deepcopy(self.model).to(self.device)
 
         self.criterion = LearnablePrototypicalLossWithDiversityRegularization(
             embedding_dim=self.embedding_size,
@@ -393,17 +394,17 @@ class RecurrenceExperiment(Experiment):
         query_loader = self.dataset.dataloader(validation=True)
 
         # === Inner loop: adapt model on support (train set) ===
-        adapted_model = copy.deepcopy(self.model).to(self.device)
+        self.adapted_model = copy.deepcopy(self.model).to(self.device)
 
-        self.pretrain_model_prototypical_center(adapted_model, support_loader, 1)
-        loss_avg1 = self.train_model_with_dynamic_lr(adapted_model, support_loader, self.optimizer1, 1)
-        loss_avg2 = self.train_model_with_dynamic_lr(adapted_model, support_loader, self.optimizer2, 1)
+        self.pretrain_model_prototypical_center(self.adapted_model, support_loader, 1)
+        loss_avg1 = self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.optimizer1, 1)
+        loss_avg2 = self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.optimizer2, 1)
 
         # === Outer loop: compute query loss on adapted model ===
-        adapted_model.eval()
+        self.adapted_model.eval()
 
         # TODO: Finish the code
-        loss_q, _, _ = self.knn_in_embedding_space(support_loader, query_loader)
+        loss_q, _, _ = self.knn_in_embedding_space(self.adapted_model, support_loader, query_loader)
 
         # x_q, y_q = next(iter(query_loader))
         # x_q, y_q = x_q.to(self.device), y_q.to(self.device)
@@ -508,7 +509,7 @@ class RecurrenceExperiment(Experiment):
         f1 = MulticlassF1Score(num_classes=self.num_classes, average='macro').to(self.device)
         conf_matrix = MulticlassConfusionMatrix(num_classes=self.num_classes).to(self.device)
 
-        loss, predicted, label = self.knn_in_embedding_space(self.model, trainloader, testloader)
+        loss, predicted, label = self.knn_in_embedding_space(self.adapted_model, trainloader, testloader)
         predicted = torch.tensor(predicted).to(self.device)
         label = torch.tensor(label).to(self.device)
 
@@ -528,7 +529,7 @@ class RecurrenceExperiment(Experiment):
 
     def validation_loop(self, data_loaders):
         train_loader, test_loader = data_loaders
-        loss_avg, acc, prec, rec, f1, conf_matrix = self.test(train_loader, test_loader)
+        loss_avg, acc, prec, rec, f1 = self.test(train_loader, test_loader)
 
         return loss_avg, {
             "TEST_ACC": acc,
