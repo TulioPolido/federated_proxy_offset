@@ -25,8 +25,11 @@ class FedMeta(flwr.server.strategy.FedAvg):
         self.global_model = model
         self.lr_outer = lr_outer
 
-    def aggregate_fit(self, rnd, results, failures):
+    def aggregate_fit(self, server_round, results, failures):
         if not results:
+            return None, {}
+        
+        if not self.accept_failures and failures:
             return None, {}
 
         # Each client should return meta-gradients as a dict {name: grad_tensor}
@@ -41,9 +44,16 @@ class FedMeta(flwr.server.strategy.FedAvg):
         with torch.no_grad():
             for name, param in self.global_model.named_parameters():
                 param -= self.lr_outer * agg_grads[name].to(param.device)
+        parameters_updated = [p.detach().cpu().numpy() for p in self.global_model.parameters()]
+
+        # Aggregate metrics
+        metrics_aggregated = {}
+        if self.fit_metrics_aggregation_fn:
+            fit_metrics = [(res.num_examples, res.metrics) for _, res in results]
+            metrics_aggregated = self.fit_metrics_aggregation_fn(fit_metrics)
 
         # Return updated model parameters to Flower
-        return [p.detach().cpu().numpy() for p in self.global_model.parameters()], {}
+        return parameters_updated, metrics_aggregated
 
 
 def fit_config(server_round):
