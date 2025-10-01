@@ -329,57 +329,22 @@ class RecurrenceExperiment(Experiment):
             fl.log(f"Error in generate_pairs(): {e}")
             return torch.tensor([]), torch.tensor([]), torch.tensor([])
 
-    # Training loop with dynamic learning rate adjustment
-    def train_model_with_dynamic_lr(self, model, train_loader, optimizer, num_epochs, frozen=False):
-        try:
-            scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=self.lr_step, gamma=self.lr_gamma)  # Reduce LR by 0.5 every 50 epochs
+    def train_model_with_dynamic_lr(self, model, train_loader, lr, num_epochs):
+        params = {name: p for name, p in model.named_parameters()}
 
-            for epoch in range(num_epochs):
-                model.train()
-                running_loss = 0.0
+        for epoch in range(num_epochs):
+            for batch_data, batch_labels in train_loader:
+                pairs1, pairs2, labels = self.generate_pairs(batch_data.to(self.device), batch_labels.to(self.device), 200)
 
-                for batch_data, batch_labels in train_loader:
-                    batch_data = batch_data.to(self.device)
-                    batch_labels = batch_labels.to(self.device)
+                embeddings_x1 = model(pairs1.float())
+                embeddings_x2 = model(pairs2.float())
+                loss = self.criterion(embeddings_x1, embeddings_x2, labels.to(self.device))
 
-                    optimizer.zero_grad()
-
-                    # Create pairs of samples and labels (1 for similar, 0 for dissimilar)
-                    # pairs, labels = create_pairs(batch_data, batch_labels)
-                    if True:
-                        pairs_1, pairs_2, labels = self.generate_pairs(batch_data, batch_labels, 200)
-                        pairs_1, pairs_2, labels = pairs_1.to(self.device), pairs_2.to(self.device), labels.to(self.device)
-
-                    # Compute embeddings using the frozen encoder
-                    if frozen:
-                        with torch.no_grad():
-                            # Compute embeddings for both elements of the pairs
-                            embeddings_x1 = model(pairs_1.float())
-                            embeddings_x2 = model(pairs_2.float())
-                            self.criterion.toggle_requires_grad(requires_grad_value=False)
-
-                    else:
-                        # Compute embeddings for both elements of the pairs
-                        embeddings_x1 = model(pairs_1.float())
-                        embeddings_x2 = model(pairs_2.float())
-                        self.criterion.toggle_requires_grad(requires_grad_value=True)
-
-                    # Compute loss
-                    loss = self.criterion(embeddings_x1, embeddings_x2, labels)
-
-                    # Backpropagation and optimization
-
-                    loss.backward()
-                    optimizer.step()
-
-                    running_loss += loss.item()
-
-                scheduler.step()
-                return running_loss/len(train_loader)
-        except Exception as e:
-            fl.log(f"Error in train_model_with_dynamic_lr(): {e}")
-            return 0.0
-            # print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {running_loss/len(train_loader):.4f}, LR: {scheduler.get_last_lr()[0]:.6f}')
+                grads = torch.autograd.grad(loss, params.values(), create_graph=True)
+                # manually update parameters without optimizer.step
+                for (name, p), g in zip(params.items(), grads):
+                    params[name] = p - lr * g
+        return params
 
     def compute_query_loss(self, model, query_loader, num_samples_for_pairs=20):
         model.eval()  # just evaluation mode, but gradients are tracked
@@ -421,13 +386,15 @@ class RecurrenceExperiment(Experiment):
         # === Inner loop: adapt model on support (train set) ===
         self.adapted_model = copy.deepcopy(self.model).to(self.device)
 
-        self.pretrain_model_prototypical_center(self.adapted_model, support_loader, 1)
-        self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.optimizer1, 1)
-        self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.optimizer2, 1)
+        # self.pretrain_model_prototypical_center(self.adapted_model, support_loader, 1)
+        # self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.optimizer1, 1)
+        self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.lr, 1)
         self.log("Computing query loss")
+
         # === Outer loop: compute query loss on adapted model ===
         loss_q = self.compute_query_loss(self.adapted_model, query_loader)
         self.log("Calculating gradients")
+
         # === Compute meta-gradients w.r.t original global model ===
         grads = torch.autograd.grad(loss_q, self.model.parameters(), create_graph=True, allow_unused=True)
 
