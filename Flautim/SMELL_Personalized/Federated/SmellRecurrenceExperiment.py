@@ -384,7 +384,8 @@ class RecurrenceExperiment(Experiment):
     def fit(self, parameters, config):
         return_dic = {}
         self.log("FedMeta client training started", details="", object="", object_id=self.id)
-
+        self.epoch_fl = config["server_round"]
+        
         # === Load global model ===
         self.model.set_parameters(parameters)
         self.model.to(self.device)
@@ -397,19 +398,12 @@ class RecurrenceExperiment(Experiment):
         self.adapted_model = copy.deepcopy(self.model).to(self.device)
 
         self.pretrain_model_prototypical_center(self.adapted_model, support_loader, 1)
-        loss_avg1 = self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.optimizer1, 1)
-        loss_avg2 = self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.optimizer2, 1)
+        self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.optimizer1, 1)
+        self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.optimizer2, 1)
 
         # === Outer loop: compute query loss on adapted model ===
         self.adapted_model.eval()
-
-        # TODO: Finish the code
         loss_q, _, _ = self.knn_in_embedding_space(self.adapted_model, support_loader, query_loader)
-
-        # x_q, y_q = next(iter(query_loader))
-        # x_q, y_q = x_q.to(self.device), y_q.to(self.device)
-
-        # loss_q = F.cross_entropy(adapted_model(x_q.float()), y_q)
 
         # === Meta-gradients w.r.t original global model ===
         grads = torch.autograd.grad(loss_q, self.model.parameters())
@@ -418,7 +412,8 @@ class RecurrenceExperiment(Experiment):
             for (name, _), g in zip(self.model.named_parameters(), grads)
         }
 
-        return_dic["LOSS_Q"] = float(loss_q.item())
+        self.model.save()
+        return_dic["LOSS_Q"] = float(loss_q)
         self.log("FedMeta client finished", details="", object="", object_id=self.id)
 
         return grads_dict, len(query_loader.dataset), return_dic
@@ -498,10 +493,10 @@ class RecurrenceExperiment(Experiment):
 
         return avg_loss, y_pred, y_label
 
-    def test(self, trainloader, testloader):
+    def test(self, model, trainloader, testloader):
         loss = 0.0
-        self.model.to(self.device)
-        self.model.eval()
+        model.to(self.device)
+        model.eval()
 
         accuracy = MulticlassAccuracy(num_classes=self.num_classes, average='macro').to(self.device)
         precision = MulticlassPrecision(num_classes=self.num_classes, average='macro').to(self.device)
@@ -509,7 +504,7 @@ class RecurrenceExperiment(Experiment):
         f1 = MulticlassF1Score(num_classes=self.num_classes, average='macro').to(self.device)
         conf_matrix = MulticlassConfusionMatrix(num_classes=self.num_classes).to(self.device)
 
-        loss, predicted, label = self.knn_in_embedding_space(self.adapted_model, trainloader, testloader)
+        loss, predicted, label = self.knn_in_embedding_space(model, trainloader, testloader)
         predicted = torch.tensor(predicted).to(self.device)
         label = torch.tensor(label).to(self.device)
 
@@ -528,8 +523,16 @@ class RecurrenceExperiment(Experiment):
         return float(loss), acc, prec, rec, f1_score, conf
 
     def validation_loop(self, data_loaders):
-        train_loader, test_loader = data_loaders
-        loss_avg, acc, prec, rec, f1 = self.test(train_loader, test_loader)
+        support_loader, query_loader = data_loaders
+
+        # ---- Inner loop adaptation ----
+        self.adapted_model = copy.deepcopy(self.model).to(self.device)
+        self.pretrain_model_prototypical_center(self.adapted_model, support_loader, 1)
+        self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.optimizer1, 1)
+        self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.optimizer2, 1)
+
+        # ---- Evaluate adapted model on query set ----
+        loss_avg, acc, prec, rec, f1, conf = self.test(self.adapted_model, support_loader, query_loader)
 
         return loss_avg, {
             "TEST_ACC": acc,
