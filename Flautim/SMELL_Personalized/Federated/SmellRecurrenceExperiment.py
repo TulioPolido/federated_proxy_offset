@@ -381,6 +381,31 @@ class RecurrenceExperiment(Experiment):
             return 0.0
             # print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {running_loss/len(train_loader):.4f}, LR: {scheduler.get_last_lr()[0]:.6f}')
 
+    def compute_query_loss(self, model, query_loader, num_samples_for_pairs=20):
+        model.eval()  # just evaluation mode, but gradients are tracked
+        running_loss = 0.0
+        total_batches = 0
+
+        for batch_data, batch_labels in query_loader:
+            batch_data, batch_labels = batch_data.to(self.device), batch_labels.to(self.device)
+
+            # Generate pairs for loss computation
+            pairs_1, pairs_2, labels = self.generate_pairs(batch_data, batch_labels, num_samples_for_pairs)
+            pairs_1, pairs_2, labels = pairs_1.to(self.device), pairs_2.to(self.device), labels.to(self.device)
+
+            # Forward pass
+            embeddings_x1 = model(pairs_1)
+            embeddings_x2 = model(pairs_2)
+
+            # Compute loss
+            loss = self.criterion(embeddings_x1, embeddings_x2, labels)
+            running_loss += loss
+            total_batches += 1
+
+        avg_loss = running_loss / total_batches if total_batches > 0 else torch.tensor(0.0, device=self.device)
+
+        return avg_loss
+
     def fit(self, parameters, config):
         return_dic = {}
         self.log("FedMeta client training started", details="", object="", object_id=self.id)
@@ -391,8 +416,7 @@ class RecurrenceExperiment(Experiment):
         self.model.to(self.device)
 
         # === Use provided splits ===
-        support_loader = self.dataset.dataloader(validation=False)
-        query_loader = self.dataset.dataloader(validation=True)
+        support_loader, query_loader = self.dataset.dataloader(validation=False)
 
         # === Inner loop: adapt model on support (train set) ===
         self.adapted_model = copy.deepcopy(self.model).to(self.device)
@@ -400,23 +424,20 @@ class RecurrenceExperiment(Experiment):
         self.pretrain_model_prototypical_center(self.adapted_model, support_loader, 1)
         self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.optimizer1, 1)
         self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.optimizer2, 1)
-
+        self.log("Computing query loss")
         # === Outer loop: compute query loss on adapted model ===
-        self.adapted_model.eval()
-        loss_q, _, _ = self.knn_in_embedding_space(self.adapted_model, support_loader, query_loader)
+        loss_q = self.compute_query_loss(self.adapted_model, query_loader)
+        self.log("Calculating gradients")
+        # === Compute meta-gradients w.r.t original global model ===
+        grads = torch.autograd.grad(loss_q, self.model.parameters(), create_graph=True, allow_unused=True)
 
-        # === Meta-gradients w.r.t original global model ===
-        grads = torch.autograd.grad(loss_q, self.model.parameters())
-        grads_dict = {
-            name: g.detach().cpu()
-            for (name, _), g in zip(self.model.named_parameters(), grads)
-        }
-
+        grads = [grad_.cpu().numpy() for grad_ in grads]
+        self.log("Saving model")
         self.model.save()
-        return_dic["LOSS_Q"] = float(loss_q)
         self.log("FedMeta client finished", details="", object="", object_id=self.id)
 
-        return grads_dict, len(query_loader.dataset), return_dic
+        return_dic = {"LOSS_Q": float(loss_q), "grads": grads}
+        return self.model.get_parameters(), len(query_loader.dataset), return_dic
 
 ################################
 # TESTING  FUNCTIONS ######

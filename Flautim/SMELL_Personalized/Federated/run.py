@@ -6,54 +6,57 @@ import flwr
 import torch
 from flwr.common import ndarrays_to_parameters
 from flwr.server import ServerConfig, ServerAppComponents
+from flwr.server.strategy.aggregate import aggregate
 import flautim as fl
 import random
 
 DATASET = "PAMAP"
 NUM_CHANNELS = 6
 BATCH_SIZE = 32
-NUM_ROUNDS = 10
-NUM_EPOCHS = 2
+NUM_ROUNDS = 50
+NUM_EPOCHS = 1
 EMB_DIM = 64
 
 
 class FedMeta(flwr.server.strategy.FedAvg):
     """Federated Meta-Learning Strategy (MAML-style)."""
 
-    def __init__(self, model, lr_outer=0.001):
-        super().__init__()
+    def __init__(self, model, lr_outer=0.001, **kwargs):
+        super().__init__(**kwargs)  # forward other FedAvg args
         self.global_model = model
         self.lr_outer = lr_outer
-
+        
     def aggregate_fit(self, server_round, results, failures):
         if not results:
             return None, {}
-        
+
         if not self.accept_failures and failures:
             return None, {}
 
-        # Each client should return meta-gradients as a dict {name: grad_tensor}
-        client_grads = [res[0] for _, res in results]
+        # Extract gradients from clients
+        grads_results = [
+            (fit_res.metrics["grads"], fit_res.num_examples)
+            for _, fit_res in results
+        ]
+        # Aggregate gradients
+        gradients_aggregated = aggregate(grads_results)
 
-        # Average gradients across clients
-        agg_grads = {}
-        for key in client_grads[0].keys():
-            agg_grads[key] = sum(grads[key] for grads in client_grads) / len(client_grads)
-
-        # Apply outer update to the global model
+        # --- Apply aggregated gradients to global model ---
         with torch.no_grad():
-            for name, param in self.global_model.named_parameters():
-                param -= self.lr_outer * agg_grads[name].to(param.device)
+            for param, grad_np in zip(self.global_model.parameters(), gradients_aggregated):
+                grad_tensor = torch.tensor(grad_np, dtype=torch.float32, device=param.device)
+                param -= self.lr_outer * grad_tensor
+
+        # Return updated parameters and aggregated metrics
         parameters_updated = [p.detach().cpu().numpy() for p in self.global_model.parameters()]
 
-        # Aggregate metrics
         metrics_aggregated = {}
         if self.fit_metrics_aggregation_fn:
             fit_metrics = [(res.num_examples, res.metrics) for _, res in results]
             metrics_aggregated = self.fit_metrics_aggregation_fn(fit_metrics)
 
-        # Return updated model parameters to Flower
         return parameters_updated, metrics_aggregated
+
 
 
 def fit_config(server_round):
