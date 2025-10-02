@@ -1,10 +1,12 @@
+from typing import List, Tuple
+from collections import OrderedDict
 from flautim.pytorch.common import run_federated, weighted_average
 import SmellRecurrenceModel
 import SmellRecurrenceDataset
 import SmellRecurrenceExperiment
 import flwr
 import torch
-from flwr.common import ndarrays_to_parameters
+from flwr.common import ndarrays_to_parameters, parameters_to_ndarrays,NDArrays
 from flwr.server import ServerConfig, ServerAppComponents
 from flwr.server.strategy.aggregate import aggregate
 import flautim as fl
@@ -12,10 +14,32 @@ import random
 
 DATASET = "PAMAP"
 NUM_CHANNELS = 6
-BATCH_SIZE = 32
-NUM_ROUNDS = 50
+BATCH_SIZE = 8
+NUM_ROUNDS = 5
 NUM_EPOCHS = 1
 EMB_DIM = 64
+
+def fedmeta_update_maml(
+    net: torch.nn.Module,
+    beta: float,
+    weights_results: NDArrays,
+    gradients_aggregated: NDArrays,
+    weight_decay: float,
+) -> NDArrays:
+    params_dict = zip(net.state_dict().keys(), weights_results)
+    state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
+    net.load_state_dict(state_dict, strict=True)
+    optimizer = torch.optim.Adam(
+        list(net.parameters()), lr=beta, weight_decay=weight_decay
+    )
+    for params, grad_ins in zip(net.parameters(), gradients_aggregated):
+        params.grad = torch.tensor(grad_ins).to(params.dtype)
+    optimizer.step()
+    optimizer.zero_grad()
+    weights_prime = [val.cpu().numpy() for _, val in net.state_dict().items()]
+
+    return weights_prime
+
 
 
 class FedMeta(flwr.server.strategy.FedAvg):
@@ -32,30 +56,35 @@ class FedMeta(flwr.server.strategy.FedAvg):
 
         if not self.accept_failures and failures:
             return None, {}
-
-        # Extract gradients from clients
-        grads_results = [
-            (fit_res.metrics["grads"], fit_res.num_examples)
+        
+                # Convert results
+        weights_results: List[Tuple[NDArrays, int]] = [
+            (parameters_to_ndarrays(fit_res.parameters), fit_res.num_examples)
             for _, fit_res in results
         ]
-        # Aggregate gradients
+
+
+        grads_results: List[Tuple[NDArrays, int]] = [
+            (fit_res.metrics["grads"], fit_res.num_examples)  # type: ignore
+            for _, fit_res in results
+        ]
         gradients_aggregated = aggregate(grads_results)
+        weights_prime = fedmeta_update_maml(
+            net=self.global_model,
+            beta=self.lr_outer,
+            weights_results=weights_results[0][0],
+            gradients_aggregated=gradients_aggregated,
+            weight_decay=0.0001,
+        )
+        parameters_aggregated = weights_prime
 
-        # --- Apply aggregated gradients to global model ---
-        with torch.no_grad():
-            for param, grad_np in zip(self.global_model.parameters(), gradients_aggregated):
-                grad_tensor = torch.tensor(grad_np, dtype=torch.float32, device=param.device)
-                param -= self.lr_outer * grad_tensor
-
-        # Return updated parameters and aggregated metrics
-        parameters_updated = [p.detach().cpu().numpy() for p in self.global_model.parameters()]
-
+        # Aggregate custom metrics if aggregation fn was provided
         metrics_aggregated = {}
         if self.fit_metrics_aggregation_fn:
             fit_metrics = [(res.num_examples, res.metrics) for _, res in results]
             metrics_aggregated = self.fit_metrics_aggregation_fn(fit_metrics)
 
-        return parameters_updated, metrics_aggregated
+        return ndarrays_to_parameters(parameters_aggregated), metrics_aggregated
 
 
 
@@ -228,6 +257,7 @@ if __name__ == "__main__":
         evaluate_fn_callback = evaluate_fn(context, combined_test_data)
         server_fn_callback = generate_server_fn(context, eval_fn=None)
 
+        fl.log("Starting Federated Experiment")
         # Run federated learning
         run_federated(
             client_fn=client_fn_callback,

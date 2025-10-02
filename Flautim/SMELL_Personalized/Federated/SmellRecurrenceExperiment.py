@@ -1,3 +1,6 @@
+from collections import OrderedDict
+from typing import Callable, Dict, List, Tuple
+
 from flautim.pytorch.federated.Experiment import Experiment
 import torch
 import torch.nn.functional as F
@@ -7,6 +10,7 @@ from torch.optim.lr_scheduler import StepLR
 from torchmetrics.classification import MulticlassAccuracy, MulticlassPrecision, MulticlassRecall, MulticlassF1Score, MulticlassConfusionMatrix
 from sklearn.neighbors import KNeighborsClassifier
 import flautim as fl
+from flwr.common.typing import NDArrays, Scalar
 import copy
 
 ###############################
@@ -245,6 +249,17 @@ class RecurrenceExperiment(Experiment):
 
         self.scheduler = StepLR(self.optimizer1, step_size=lr_step, gamma=lr_gamma)
 
+    def get_parameters(self, config: Dict[str, Scalar]) -> NDArrays:
+        """Return the parameters of the current net."""
+        return [val.cpu().numpy() for _, val in self.model.state_dict().items()]
+
+    def set_parameters(self, parameters: NDArrays) -> None:
+        """Change the parameters of the model using the given ones."""
+        params_dict = zip(self.model.state_dict().keys(), parameters)
+        device = next(self.model.parameters()).device
+        state_dict = OrderedDict({k: torch.tensor(v, device=device) for k, v in params_dict})
+        self.model.load_state_dict(state_dict, strict=True)
+
 
 ################################
 # TRAINING FUNCTIONS ######
@@ -329,47 +344,65 @@ class RecurrenceExperiment(Experiment):
             fl.log(f"Error in generate_pairs(): {e}")
             return torch.tensor([]), torch.tensor([]), torch.tensor([])
 
-    def train_model_with_dynamic_lr(self, model, train_loader, lr, num_epochs):
-        params = {name: p for name, p in model.named_parameters()}
-
-        for epoch in range(num_epochs):
+    def train_model_with_dynamic_lr(self, model, train_loader, lr, num_epochs=1):
+        for _ in range(num_epochs):
+            loss_sum = 0.0
+            sup_num_sample = []
+            sup_total_loss = []
             for batch_data, batch_labels in train_loader:
-                pairs1, pairs2, labels = self.generate_pairs(batch_data.to(self.device), batch_labels.to(self.device), 200)
-
+                pairs1, pairs2, labels = self.generate_pairs(batch_data.to(self.device), batch_labels.to(self.device), 100)
                 embeddings_x1 = model(pairs1.float())
                 embeddings_x2 = model(pairs2.float())
-                loss = self.criterion(embeddings_x1, embeddings_x2, labels.to(self.device))
 
-                grads = torch.autograd.grad(loss, params.values(), create_graph=True)
-                # manually update parameters without optimizer.step
-                for (name, p), g in zip(params.items(), grads):
-                    params[name] = p - lr * g
-        return params
+                loss = self.criterion(embeddings_x1, embeddings_x2, labels.to(self.device))
+                loss_sum += loss * labels.size(0)
+                sup_num_sample.append(labels.size(0))
+                sup_total_loss.append(loss * labels.size(0))
+
+            grads = torch.autograd.grad(
+                loss, list(model.parameters()), create_graph=True, retain_graph=True
+            )
+
+            for param, grad_ in zip(model.parameters(), grads):
+                param.data = param.data - lr * grad_
+
+            for param in model.parameters():
+                if param.grad is not None:
+                        param.grad.zero_()
+
+        loss = sum(sup_total_loss) / sum(sup_num_sample)
+        return loss
 
     def compute_query_loss(self, model, query_loader, num_samples_for_pairs=20):
         model.eval()  # just evaluation mode, but gradients are tracked
-        running_loss = 0.0
-        total_batches = 0
+        qry_total_loss = []
+        qry_num_sample = []
+        loss_sum = 0.0
 
         for batch_data, batch_labels in query_loader:
             batch_data, batch_labels = batch_data.to(self.device), batch_labels.to(self.device)
-
             # Generate pairs for loss computation
             pairs_1, pairs_2, labels = self.generate_pairs(batch_data, batch_labels, num_samples_for_pairs)
             pairs_1, pairs_2, labels = pairs_1.to(self.device), pairs_2.to(self.device), labels.to(self.device)
-
             # Forward pass
             embeddings_x1 = model(pairs_1)
             embeddings_x2 = model(pairs_2)
 
             # Compute loss
             loss = self.criterion(embeddings_x1, embeddings_x2, labels)
-            running_loss += loss
-            total_batches += 1
+            loss_sum += loss * labels.size(0)
+            qry_num_sample.append(labels.size(0))
+            qry_total_loss.append(loss.item())
 
-        avg_loss = running_loss / total_batches if total_batches > 0 else torch.tensor(0.0, device=self.device)
+        loss_sum = loss_sum / sum(qry_num_sample)
+        grads = torch.autograd.grad(loss_sum, list(model.parameters()))
 
-        return avg_loss
+        for param in model.parameters():
+            if param.grad is not None:
+                param.grad.zero_()
+
+        grads = [grad_.cpu().numpy() for grad_ in grads]
+        return grads
 
     def fit(self, parameters, config):
         return_dic = {}
@@ -377,34 +410,23 @@ class RecurrenceExperiment(Experiment):
         self.epoch_fl = config["server_round"]
         
         # === Load global model ===
-        self.model.set_parameters(parameters)
-        self.model.to(self.device)
+        self.set_parameters(parameters)
 
         # === Use provided splits ===
         support_loader, query_loader = self.dataset.dataloader(validation=False)
+        total_len = len(support_loader.dataset) + len(query_loader.dataset)
 
         # === Inner loop: adapt model on support (train set) ===
         self.adapted_model = copy.deepcopy(self.model).to(self.device)
 
-        # self.pretrain_model_prototypical_center(self.adapted_model, support_loader, 1)
-        # self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.optimizer1, 1)
-        self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.lr, 1)
-        self.log("Computing query loss")
+        loss = self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.lr, 1)
 
         # === Outer loop: compute query loss on adapted model ===
-        loss_q = self.compute_query_loss(self.adapted_model, query_loader)
-        self.log("Calculating gradients")
+        grads = self.compute_query_loss(self.adapted_model, query_loader)
 
-        # === Compute meta-gradients w.r.t original global model ===
-        grads = torch.autograd.grad(loss_q, self.model.parameters(), create_graph=True, allow_unused=True)
-
-        grads = [grad_.cpu().numpy() for grad_ in grads]
-        self.log("Saving model")
-        self.model.save()
         self.log("FedMeta client finished", details="", object="", object_id=self.id)
 
-        return_dic = {"LOSS_Q": float(loss_q), "grads": grads}
-        return self.model.get_parameters(), len(query_loader.dataset), return_dic
+        return self.get_parameters({}), total_len, {"loss": loss, "grads": grads}
 
 ################################
 # TESTING  FUNCTIONS ######
@@ -515,9 +537,7 @@ class RecurrenceExperiment(Experiment):
 
         # ---- Inner loop adaptation ----
         self.adapted_model = copy.deepcopy(self.model).to(self.device)
-        self.pretrain_model_prototypical_center(self.adapted_model, support_loader, 1)
-        self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.optimizer1, 1)
-        self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.optimizer2, 1)
+        loss = self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.lr, 1)
 
         # ---- Evaluate adapted model on query set ----
         loss_avg, acc, prec, rec, f1, conf = self.test(self.adapted_model, support_loader, query_loader)
@@ -527,4 +547,4 @@ class RecurrenceExperiment(Experiment):
             "TEST_PREC": prec,
             "Recall": rec,
             "TEST_F1": f1
-    }
+        }
