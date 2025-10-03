@@ -406,7 +406,7 @@ class RecurrenceExperiment(Experiment):
         self.epoch_fl = config["server_round"]
         
         # === Load global model ===
-        self.set_parameters(parameters)
+        self.model.set_parameters(parameters)
 
         # === Use provided splits ===
         support_loader, query_loader = self.dataset.dataloader(validation=False)
@@ -415,14 +415,14 @@ class RecurrenceExperiment(Experiment):
         # === Inner loop: adapt model on support (train set) ===
         self.adapted_model = copy.deepcopy(self.model).to(self.device)
 
-        loss = self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.lr, 1)
+        loss = self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.lr, self.epochs)
 
         # === Outer loop: compute query loss on adapted model ===
         grads = self.compute_query_loss(self.adapted_model, query_loader)
 
         self.log("FedMeta client finished", details="", object="", object_id=self.id)
 
-        return self.model.get_parameters(), total_len, {"loss": loss, "grads": 1}
+        return self.model.get_parameters(), total_len, {"loss": loss, "grads": grads}
 
 ################################
 # TESTING  FUNCTIONS ######
@@ -533,7 +533,7 @@ class RecurrenceExperiment(Experiment):
 
         # ---- Inner loop adaptation ----
         self.adapted_model = copy.deepcopy(self.model).to(self.device)
-        loss = self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.lr, 1)
+        loss = self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.lr, self.epochs)
 
         # ---- Evaluate adapted model on query set ----
         loss_avg, acc, prec, rec, f1, conf = self.test(self.adapted_model, support_loader, query_loader)
