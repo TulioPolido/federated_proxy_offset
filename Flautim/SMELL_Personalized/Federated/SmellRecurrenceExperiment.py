@@ -422,7 +422,7 @@ class RecurrenceExperiment(Experiment):
 
         self.log("FedMeta client finished", details="", object="", object_id=self.id)
 
-        return self.model.get_parameters(), total_len, {"loss": loss, "grads": grads}
+        return self.model.get_parameters(), total_len, {"loss": loss, "grads": 1}
 
 ################################
 # TESTING  FUNCTIONS ######
