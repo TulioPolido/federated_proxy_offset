@@ -292,57 +292,53 @@ class RecurrenceExperiment(Experiment):
             # fl.log(f'Pretrain Epoch [{epoch+1}/{num_epochs}], Loss: {running_loss/len(dataloader):.4f}')
 
     def generate_pairs(self, X, Y, N):
-        try:
-            # Ensure N is even
-            if N % 2 != 0:
-                raise ValueError("N must be an even number.")
+        # Ensure N is even
+        if N % 2 != 0:
+            raise ValueError("N must be an even number.")
 
-            num_same_label_pairs = N // 2
-            num_different_label_pairs = N // 2
+        num_same_label_pairs = N // 2
+        num_different_label_pairs = N // 2
 
-            # Precompute label indices
-            label_to_indices = {label.item(): (Y == label).nonzero(as_tuple=True)[0].tolist() for label in torch.unique(Y)}
+        # Precompute label indices
+        label_to_indices = {label.item(): (Y == label).nonzero(as_tuple=True)[0].tolist() for label in torch.unique(Y)}
 
-            X1, X2, labels = [], [], []
+        X1, X2, labels = [], [], []
 
-            # Generate similar pairs (same label)
-            for _ in range(num_same_label_pairs):
-                # Sample a label that has more than one instance
-                while True:
-                    sampled_label = random.choice(list(label_to_indices.keys()))
-                    indices = label_to_indices[sampled_label]
-                    if len(indices) > 1:
-                        # Randomly sample two distinct indices for the same label
-                        idx1, idx2 = random.sample(indices, 2)
-                        X1.append(X[idx1])
-                        X2.append(X[idx2])
-                        labels.append(1)  # Similar pair label
-                        # Ensure the label has more than one element
-                        break
-
-            # Generate dissimilar pairs (different labels)
-            for _ in range(num_different_label_pairs):
-                # Sample two different labels
-                while len(list(label_to_indices.keys())) >= 2:
-
-                    label1, label2 = random.sample(list(label_to_indices.keys()), 2)
-                    idx1 = random.choice(label_to_indices[label1])
-                    idx2 = random.choice(label_to_indices[label2])
-                    # Directly add the dissimilar pairs
+        # Generate similar pairs (same label)
+        for _ in range(num_same_label_pairs):
+            # Sample a label that has more than one instance
+            while True:
+                sampled_label = random.choice(list(label_to_indices.keys()))
+                indices = label_to_indices[sampled_label]
+                if len(indices) > 1:
+                    # Randomly sample two distinct indices for the same label
+                    idx1, idx2 = random.sample(indices, 2)
                     X1.append(X[idx1])
                     X2.append(X[idx2])
-                    labels.append(0)  # Dissimilar pair label
+                    labels.append(1)  # Similar pair label
+                    # Ensure the label has more than one element
                     break
 
-            # Convert lists to tensors efficiently in one go
-            X1 = torch.stack(X1)
-            X2 = torch.stack(X2)
-            labels = torch.tensor(labels)
+        # Generate dissimilar pairs (different labels)
+        for _ in range(num_different_label_pairs):
+            # Sample two different labels
+            while len(list(label_to_indices.keys())) >= 2:
 
-            return X1, X2, labels
-        except Exception as e:
-            fl.log(f"Error in generate_pairs(): {e}")
-            return torch.tensor([]), torch.tensor([]), torch.tensor([])
+                label1, label2 = random.sample(list(label_to_indices.keys()), 2)
+                idx1 = random.choice(label_to_indices[label1])
+                idx2 = random.choice(label_to_indices[label2])
+                # Directly add the dissimilar pairs
+                X1.append(X[idx1])
+                X2.append(X[idx2])
+                labels.append(0)  # Dissimilar pair label
+                break
+
+        # Convert lists to tensors efficiently in one go
+        X1 = torch.stack(X1)
+        X2 = torch.stack(X2)
+        labels = torch.tensor(labels)
+
+        return X1, X2, labels
 
     def train_model_with_dynamic_lr(self, model, train_loader, lr, num_epochs=1):
         for _ in range(num_epochs):
@@ -426,7 +422,7 @@ class RecurrenceExperiment(Experiment):
 
         self.log("FedMeta client finished", details="", object="", object_id=self.id)
 
-        return self.get_parameters({}), total_len, {"loss": loss, "grads": grads}
+        return self.model.get_parameters(), total_len, {"loss": loss, "grads": grads}
 
 ################################
 # TESTING  FUNCTIONS ######
