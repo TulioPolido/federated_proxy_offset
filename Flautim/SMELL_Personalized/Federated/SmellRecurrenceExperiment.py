@@ -350,7 +350,7 @@ class RecurrenceExperiment(Experiment):
             sup_num_sample = []
             sup_total_loss = []
             for batch_data, batch_labels in train_loader:
-                pairs1, pairs2, labels = self.generate_pairs(batch_data.to(self.device), batch_labels.to(self.device), 100)
+                pairs1, pairs2, labels = self.generate_pairs(batch_data.to(self.device), batch_labels.to(self.device), 200)
                 embeddings_x1 = model(pairs1.float())
                 embeddings_x2 = model(pairs2.float())
 
@@ -359,16 +359,16 @@ class RecurrenceExperiment(Experiment):
                 sup_num_sample.append(labels.size(0))
                 sup_total_loss.append(loss * labels.size(0))
 
-            grads = torch.autograd.grad(
-                loss, list(model.parameters()), create_graph=True, retain_graph=True
-            )
+                grads = torch.autograd.grad(
+                    loss, list(model.parameters()), create_graph=False
+                )
 
-            for param, grad_ in zip(model.parameters(), grads):
-                param.data = param.data - lr * grad_
+                for param, grad_ in zip(model.parameters(), grads):
+                    param.data = param.data - lr * grad_
 
-            for param in model.parameters():
-                if param.grad is not None:
-                        param.grad.zero_()
+                for param in model.parameters():
+                    if param.grad is not None:
+                            param.grad.zero_()
 
         loss = sum(sup_total_loss) / sum(sup_num_sample)
         return loss
