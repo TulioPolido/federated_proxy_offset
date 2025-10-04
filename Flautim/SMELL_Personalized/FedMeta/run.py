@@ -279,7 +279,7 @@ def generate_client_fn(context, files, test_file):
             use_erase=False,
             use_jitter=False,
             use_rotation=True,
-            num_workers=0,
+            # num_workers=0,
         )
 
         return SmellRecurrenceExperiment.RecurrenceExperiment(

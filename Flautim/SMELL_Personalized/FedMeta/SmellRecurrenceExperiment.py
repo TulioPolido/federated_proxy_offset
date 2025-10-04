@@ -387,9 +387,9 @@ class RecurrenceExperiment(Experiment):
                 pairs1, pairs2, labels = self.generate_pairs(
                     batch_data.to(self.device), batch_labels.to(self.device), 200
                 )
-                pairs_1, pairs_2, labels = (
-                    pairs_1.to(self.device),
-                    pairs_2.to(self.device),
+                pairs1, pairs2, labels = (
+                    pairs1.to(self.device),
+                    pairs2.to(self.device),
                     labels.to(self.device),
                 )
                 embeddings_x1 = model(pairs1.float())
