@@ -1,6 +1,3 @@
-from collections import OrderedDict
-from typing import Callable, Dict, List, Tuple
-
 from flautim.pytorch.federated.Experiment import Experiment
 import torch
 import torch.nn.functional as F
@@ -16,8 +13,6 @@ from torchmetrics.classification import (
 )
 from sklearn.neighbors import KNeighborsClassifier
 import flautim as fl
-from flwr.common.typing import NDArrays, Scalar
-import copy
 
 ###############################
 # PROTOTIPICAL CENTER LOSS
@@ -230,6 +225,7 @@ class RecurrenceExperiment(Experiment):
         model,
         dataset,
         context,
+        client_name=None,
         lr=0.001,
         pre_train_lr=0.001,
         epochs=10,
@@ -239,12 +235,11 @@ class RecurrenceExperiment(Experiment):
         num_classes=7,
         embedding_size=64,
         margin=1.0,
-        # pre_train=False,
         **kwargs,
     ):
+
         super(RecurrenceExperiment, self).__init__(model, dataset, context, **kwargs)
 
-        # self.pre_train = pre_train
         self.epochs = epochs
         self.num_classes = num_classes
         self.margin = margin
@@ -254,10 +249,10 @@ class RecurrenceExperiment(Experiment):
         self.lr_step = lr_step
         self.lr_gamma = lr_gamma
         self.weight_decay = weight_decay
+        self.client_name = client_name
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
-        self.adapted_model = copy.deepcopy(self.model).to(self.device)
 
         self.criterion = LearnablePrototypicalLossWithDiversityRegularization(
             embedding_dim=self.embedding_size,
@@ -283,23 +278,13 @@ class RecurrenceExperiment(Experiment):
 
         self.scheduler = StepLR(self.optimizer1, step_size=lr_step, gamma=lr_gamma)
 
-    def get_parameters(self, config: Dict[str, Scalar]) -> NDArrays:
-        """Return the parameters of the current net."""
-        return [val.cpu().numpy() for _, val in self.model.state_dict().items()]
-
-    def set_parameters(self, parameters: NDArrays) -> None:
-        """Change the parameters of the model using the given ones."""
-        params_dict = zip(self.model.state_dict().keys(), parameters)
-        state_dict = OrderedDict({k: torch.Tensor(v) for k, v in params_dict})
-        self.model.load_state_dict(state_dict, strict=True)
-
     ################################
     # TRAINING FUNCTIONS ######
     ################################
 
-    def pretrain_model_prototypical_center(self, model, dataloader, num_epochs):
-
-        model.train()  # Set the model to training mode
+    # Modify the pretrain function to use prototypical center loss
+    def pretrain_model_prototypical_center(self, dataloader, num_epochs):
+        self.model.train()  # Set the self.model to training mode
 
         for epoch in range(num_epochs):
             running_loss = 0.0
@@ -309,7 +294,7 @@ class RecurrenceExperiment(Experiment):
                 batch_labels = batch_labels.to(self.device)
 
                 # Forward pass: compute embeddings
-                embeddings = model(batch_data.float())
+                embeddings = self.model(batch_data.float())
 
                 # Compute prototypical center loss
                 loss = self.pre_criterion(embeddings, batch_labels)
@@ -375,135 +360,120 @@ class RecurrenceExperiment(Experiment):
 
         return X1, X2, labels
 
-    def train_model_with_dynamic_lr(self, model, train_loader, alpha, num_epochs=1):
-        for _ in range(num_epochs):
-            loss_sum = 0.0
-            sup_num_sample = []
-            sup_total_loss = []
+    # Training loop with dynamic learning rate adjustment
+    def train_model_with_dynamic_lr(
+        self, train_loader, optimizer, num_epochs, frozen=False
+    ):
+        scheduler = torch.optim.lr_scheduler.StepLR(
+            optimizer, step_size=self.lr_step, gamma=self.lr_gamma
+        )  # Reduce LR by 0.5 every 50 epochs
+
+        for epoch in range(num_epochs):
+            self.model.train()
+            running_loss = 0.0
+
             for batch_data, batch_labels in train_loader:
-                pairs1, pairs2, labels = self.generate_pairs(
-                    batch_data.to(self.device), batch_labels.to(self.device), 200
-                )
-                embeddings_x1 = model(pairs1.float())
-                embeddings_x2 = model(pairs2.float())
+                batch_data = batch_data.to(self.device)
+                batch_labels = batch_labels.to(self.device)
 
-                loss = self.criterion(
-                    embeddings_x1, embeddings_x2, labels.to(self.device)
-                )
-                loss_sum += loss * labels.size(0)
-                sup_num_sample.append(labels.size(0))
-                sup_total_loss.append(loss * labels.size(0))
+                optimizer.zero_grad()
 
-                grads = torch.autograd.grad(
-                    loss, list(model.parameters()), create_graph=False
-                )
+                # Create pairs of samples and labels (1 for similar, 0 for dissimilar)
+                # pairs, labels = create_pairs(batch_data, batch_labels)
+                if True:
+                    pairs_1, pairs_2, labels = self.generate_pairs(
+                        batch_data, batch_labels, 200
+                    )
+                    pairs_1, pairs_2, labels = (
+                        pairs_1.to(self.device),
+                        pairs_2.to(self.device),
+                        labels.to(self.device),
+                    )
 
-                for param, grad_, alphas in zip(model.parameters(), grads, alpha):
-                    param.data = param.data - alphas * grad_
+                # Compute embeddings using the frozen encoder
+                if frozen:
+                    with torch.no_grad():
+                        # Compute embeddings for both elements of the pairs
+                        embeddings_x1 = self.model(pairs_1.float())
+                        embeddings_x2 = self.model(pairs_2.float())
+                        self.criterion.toggle_requires_grad(requires_grad_value=False)
 
-                for param in model.parameters():
-                    if param.grad is not None:
-                        param.grad.zero_()
+                else:
+                    # Compute embeddings for both elements of the pairs
+                    embeddings_x1 = self.model(pairs_1.float())
+                    embeddings_x2 = self.model(pairs_2.float())
+                    self.criterion.toggle_requires_grad(requires_grad_value=True)
 
-        loss = sum(sup_total_loss) / sum(sup_num_sample)
-        return loss
+                # Compute loss
+                loss = self.criterion(embeddings_x1, embeddings_x2, labels)
 
-    def compute_query_loss(self, model, query_loader, num_samples_for_pairs=20):
-        model.eval()  # just evaluation mode, but gradients are tracked
-        qry_total_loss = []
-        qry_num_sample = []
-        loss_sum = 0.0
+                # Backpropagation and optimization
 
-        for batch_data, batch_labels in query_loader:
-            batch_data, batch_labels = batch_data.to(self.device), batch_labels.to(
-                self.device
+                loss.backward()
+                optimizer.step()
+
+                running_loss += loss.item()
+
+            scheduler.step()
+            return running_loss / len(train_loader)
+
+    def training_loop(self, data_loaders):
+        train_loader, _ = data_loaders
+        self.pretrain_model_prototypical_center(train_loader, 2)
+        loss_avg1 = self.train_model_with_dynamic_lr(
+            train_loader, self.optimizer1, self.epochs
+        )
+        loss_avg2 = self.train_model_with_dynamic_lr(
+            train_loader, self.optimizer2, self.epochs
+        )
+        return (loss_avg1 + loss_avg2) / 2, {}
+
+    def fit(self, parameters, config):
+        return_dic = {}
+
+        self.log(
+            f"{self.client_name} - Model training started",
+            details="",
+            object="",
+            object_id=self.id,
+        )
+
+        self.model.set_parameters(parameters)
+
+        self.epoch_fl = config["server_round"]
+
+        for epochs in range(1, self.epochs + 1):
+            loss, values_metrics_train = self.training_loop(self.dataset.dataloader())
+            values_metrics_train["LOSS"] = loss
+        for name in values_metrics_train:
+            self.measures.log(
+                self,
+                name,
+                values_metrics_train[name],
+                validation=False,
+                epoch=self.epoch_fl,
             )
-            # Generate pairs for loss computation
-            pairs_1, pairs_2, labels = self.generate_pairs(
-                batch_data, batch_labels, num_samples_for_pairs
-            )
-            pairs_1, pairs_2, labels = (
-                pairs_1.to(self.device),
-                pairs_2.to(self.device),
-                labels.to(self.device),
-            )
-            # Forward pass
-            embeddings_x1 = model(pairs_1)
-            embeddings_x2 = model(pairs_2)
+            return_dic[name] = float(values_metrics_train[name])
 
-            # Compute loss
-            loss = self.criterion(embeddings_x1, embeddings_x2, labels)
-            loss_sum += loss * labels.size(0)
-            qry_num_sample.append(labels.size(0))
-            qry_total_loss.append(loss.item())
+        self.log(
+            f"{self.client_name} - Model training finished",
+            details="",
+            object="",
+            object_id=self.id,
+        )
 
-        loss_sum = loss_sum / sum(qry_num_sample)
-        grads = torch.autograd.grad(loss_sum, list(model.parameters()))
+        self.model.save()
 
-        for param in model.parameters():
-            if param.grad is not None:
-                param.grad.zero_()
-
-        grads = [grad_.cpu().numpy() for grad_ in grads]
-        return grads
-
-    def fit(  # type: ignore
-        self, parameters: NDArrays, config: Dict[str, Scalar]
-    ) -> Tuple[NDArrays, int, Dict]:
-        try:
-            alpha = config["alpha"]
-            self.log(
-                "FedMeta client training started",
-                details="",
-                object="",
-                object_id=self.id,
-            )
-            self.epoch_fl = config["server_round"]
-
-            # === Load global model ===
-            self.model.set_parameters(parameters)
-
-            # === Use provided splits ===
-            support_loader, query_loader = self.dataset.dataloader(validation=False)
-            total_len = len(support_loader.dataset) + len(query_loader.dataset)
-
-            # === Inner loop: adapt model on support (train set) ===
-            self.adapted_model = copy.deepcopy(self.model).to(self.device)
-
-            loss = self.train_model_with_dynamic_lr(
-                self.adapted_model, support_loader, alpha, self.epochs
-            )
-
-            # === Outer loop: compute query loss on adapted model ===
-            grads = self.compute_query_loss(  # type: ignore
-                self.adapted_model, query_loader
-            )
-
-            self.log(
-                "FedMeta client finished", details="", object="", object_id=self.id
-            )
-
-            # grads is already a list of numpy arrays
-            return (
-                self.model.get_parameters(),
-                total_len,
-                {"loss": loss.item(), "grads": grads},
-            )
-        except Exception as e:
-            import traceback
-
-            self.log(f"Exception in fit(): {e}\n{traceback.format_exc()}")
-            raise
+        return self.model.get_parameters(), len(self.dataset.dataloader()), return_dic
 
     ################################
     # TESTING  FUNCTIONS ######
     ################################
 
     def knn_in_embedding_space(
-        self, model, train_loader, test_loader, k=1, num_samples_for_pairs=20
+        self, train_loader, test_loader, k=1, num_samples_for_pairs=20
     ):
-
-        model.eval()
+        self.model.eval()
 
         # Collect train embeddings and labels
         train_embeddings = []
@@ -513,7 +483,7 @@ class RecurrenceExperiment(Experiment):
             for batch_data, batch_labels in train_loader:
                 # batch_data = batch_data.view(batch_data.size(0), -1).to(self.device)
                 batch_data = batch_data.to(self.device)
-                embeddings = model(batch_data)
+                embeddings = self.model(batch_data)
                 train_embeddings.append(embeddings.cpu())
                 train_labels.append(batch_labels)
 
@@ -534,7 +504,7 @@ class RecurrenceExperiment(Experiment):
             for batch_data, batch_labels in test_loader:
                 # batch_data = batch_data.view(batch_data.size(0), -1).to(self.device)
                 batch_data = batch_data.to(self.device)
-                embeddings = model(batch_data).cpu().numpy()
+                embeddings = self.model(batch_data).cpu().numpy()
 
                 # Perform k-NN classification in embedding space
                 predicted_labels = knn.predict(embeddings)
@@ -556,8 +526,8 @@ class RecurrenceExperiment(Experiment):
                 )
 
                 # Compute embeddings for pairs
-                embeddings_x1 = model(pairs_1)
-                embeddings_x2 = model(pairs_2)
+                embeddings_x1 = self.model(pairs_1)
+                embeddings_x2 = self.model(pairs_2)
 
                 # Compute loss
                 loss = self.criterion(embeddings_x1, embeddings_x2, labels)
@@ -578,10 +548,10 @@ class RecurrenceExperiment(Experiment):
 
         return avg_loss, y_pred, y_label
 
-    def test(self, model, trainloader, testloader):
+    def test(self, trainloader, testloader):
         loss = 0.0
-        model.to(self.device)
-        model.eval()
+        self.model.to(self.device)
+        self.model.eval()
 
         accuracy = MulticlassAccuracy(num_classes=self.num_classes, average="macro").to(
             self.device
@@ -599,9 +569,7 @@ class RecurrenceExperiment(Experiment):
             self.device
         )
 
-        loss, predicted, label = self.knn_in_embedding_space(
-            model, trainloader, testloader
-        )
+        loss, predicted, label = self.knn_in_embedding_space(trainloader, testloader)
         predicted = torch.tensor(predicted).to(self.device)
         label = torch.tensor(label).to(self.device)
 
@@ -619,80 +587,63 @@ class RecurrenceExperiment(Experiment):
 
         return float(loss), acc, prec, rec, f1_score, conf
 
-    def validation_loop(self, data_loaders, alpha):
-        support_loader, query_loader = data_loaders
-
-        # ---- Inner loop adaptation ----
-        self.adapted_model = copy.deepcopy(self.model).to(self.device)
-        loss = self.train_model_with_dynamic_lr(
-            self.adapted_model, support_loader, alpha, self.epochs
-        )
-
-        # ---- Evaluate adapted model on query set ----
-        loss_avg, acc, prec, rec, f1, conf = self.test(
-            self.adapted_model, support_loader, query_loader
-        )
-
+    def validation_loop(self, data_loaders):
+        train_loader, test_loader = data_loaders
+        loss_avg, acc, prec, rec, f1, conf_matrix = self.test(train_loader, test_loader)
         return loss_avg, {
             "TEST_ACC": acc,
             "TEST_PREC": prec,
             "Recall": rec,
             "TEST_F1": f1,
+            # "TEST_CONF": str(conf_matrix),
         }
 
-    def evaluate(  # type: ignore
-        self, parameters: NDArrays, config: Dict[str, Scalar]
-    ) -> Tuple[float, int, Dict]:
-        try:
-            alpha = config["alpha"]
-            return_dic = {}
+    def evaluate(self, parameters, config):
 
-            self.log(
-                f"FedMeta Model evaluation started",
-                details="",
-                object="experiment_evaluate",
-                object_id=self.id,
+        return_dic = {}
+
+        self.log(
+            f"{self.client_name} - Model evaluation started",
+            details="",
+            object="experiment_evaluate",
+            object_id=self.id,
+        )
+
+        self.model.set_parameters(parameters)
+
+        self.epoch_fl = config["server_round"]
+
+        loss, values_metrics_validation = self.validation_loop(
+            self.dataset.dataloader(validation=True)
+        )
+        values_metrics_validation["LOSS"] = loss
+
+        self.log(
+            f"{self.client_name} - Model training finished",
+            details="",
+            object="experiment_evaluate",
+        )
+
+        self.log(
+            f"{self.client_name} - Mesure: "
+            + "metrics."
+            + str(values_metrics_validation),
+            details="",
+            object="",
+            object_id=self.id,
+        )
+
+        for name in values_metrics_validation:
+            # self.log(f"Mesure: "+ 'metrics.' + str(name) , details="", object="", object_id=self.id)
+            self.measures.log(
+                self,
+                name,
+                values_metrics_validation[name],
+                validation=True,
+                epoch=self.epoch_fl,
             )
+            return_dic[name] = float(values_metrics_validation[name])
 
-            # self.log(f"Params size: {len(parameters)}")
-            # self.log(f"Params type: {type(parameters[0])}")
-            self.model.set_parameters(parameters)
+        self.model.save()
 
-            self.epoch_fl = config["server_round"]
-
-            loss, values_metrics_validation = self.validation_loop(
-                self.dataset.dataloader(validation=True), alpha
-            )
-            values_metrics_validation["LOSS"] = loss
-
-            self.log(
-                "Model training finished", details="", object="experiment_evaluate"
-            )
-
-            self.log(
-                f"Mesure: " + "metrics." + str(values_metrics_validation),
-                details="",
-                object="",
-                object_id=self.id,
-            )
-
-            for name in values_metrics_validation:
-                # self.log(f"Mesure: "+ 'metrics.' + str(name) , details="", object="", object_id=self.id)
-                self.measures.log(
-                    self,
-                    name,
-                    values_metrics_validation[name],
-                    validation=True,
-                    epoch=self.epoch_fl,
-                )
-                return_dic[name] = float(values_metrics_validation[name])
-
-            self.model.save()
-
-            return (
-                float(loss),
-                len(self.dataset.dataloader(validation=True)),
-                return_dic,
-            )
-        except Exception as e:
-            self.log(f"Error in client evaluate: {e}")
+        return float(loss), len(self.dataset.dataloader(validation=True)), return_dic

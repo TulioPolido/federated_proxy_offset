@@ -1,11 +1,14 @@
 from collections import OrderedDict
 from typing import Dict, List, Optional, Tuple, Union
 from flautim.pytorch.common import run_federated, weighted_average
+import numpy as np
 import SmellRecurrenceModel
 import SmellRecurrenceDataset
 import SmellRecurrenceExperiment
 import flwr
 import torch
+from logging import INFO
+from flwr.common.logger import log
 from flwr.common import (
     EvaluateIns,
     EvaluateRes,
@@ -76,35 +79,39 @@ class FedMeta(flwr.server.strategy.FedAvg):
         super().__init__(**kwargs)  # forward other FedAvg args
         self.net = model
         self.beta = lr_outer
-        self.alpha = torch.nn.ParameterList(
-            [
-                torch.nn.Parameter(torch.full_like(p, lr_inner))
-                for p in self.net.parameters()
-            ]
-        )
+        self.alpha = lr_inner
+        # self.alpha = torch.nn.ParameterList(
+        #     [
+        #         torch.nn.Parameter(torch.full_like(p, lr_inner))
+        #         for p in self.net.parameters()
+        #     ]
+        # )
 
-    def configure_fit(
-        self, server_round: int, parameters: Parameters, client_manager: ClientManager
-    ) -> List[Tuple[ClientProxy, FitIns]]:
-        """Configure the next round of training."""
-        if self.on_fit_config_fn is not None:
-            # Custom fit config function provided
-            config = self.on_fit_config_fn(server_round)
-        config["alpha"] = self.alpha
-        fit_ins = FitIns(parameters, config)
+    # def configure_fit(
+    #     self, server_round: int, parameters: Parameters, client_manager: ClientManager
+    # ) -> List[Tuple[ClientProxy, FitIns]]:
+    #     """Configure the next round of training."""
+    #     if self.on_fit_config_fn is not None:
+    #         # Custom fit config function provided
+    #         config = self.on_fit_config_fn(server_round)
+    #     config["alpha"] = self.alpha
+    #     fit_ins = FitIns(parameters, config)
 
-        # Sample clients
-        sample_size, min_num_clients = self.num_fit_clients(
-            client_manager.num_available()
-        )
-        clients = client_manager.sample(
-            num_clients=sample_size, min_num_clients=min_num_clients
-        )
+    #     # Sample clients
+    #     sample_size, min_num_clients = self.num_fit_clients(
+    #         client_manager.num_available()
+    #     )
+    #     clients = client_manager.sample(
+    #         num_clients=sample_size, min_num_clients=min_num_clients
+    #     )
 
-        # Return client/config pairs
-        return [(client, fit_ins) for client in clients]
+    #     # Return client/config pairs
+    #     return [(client, fit_ins) for client in clients]
 
     def aggregate_fit(self, server_round, results, failures):
+        for failure in failures:
+            print(f"Fit Failure: {failure}")
+
         if not results:
             return None, {}
 
@@ -117,10 +124,20 @@ class FedMeta(flwr.server.strategy.FedAvg):
             for _, fit_res in results
         ]
 
-        grads_results: List[Tuple[NDArrays, int]] = [
-            (fit_res.metrics["grads"], fit_res.num_examples)  # type: ignore
-            for _, fit_res in results
-        ]
+        # Load grads from the files
+        grads_results: List[Tuple[NDArrays, int]] = []
+        for _, fit_res in results:
+            grads_file = fit_res.metrics.get("grads_file")
+            if grads_file is None:
+                raise ValueError("No grads_file in metrics for a client!")
+            # Load the .npz file
+            log(INFO, f"Reading file for: {grads_file}")
+            file_path = f"gradients_{grads_file}.npz"
+            with np.load(file_path) as data:
+                grads = [data[key] for key in data]
+            grads_results.append((grads, fit_res.num_examples))
+
+        # Aggregate gradients
         gradients_aggregated = aggregate(grads_results)
 
         weights_prime = fedmeta_update_maml(
@@ -130,7 +147,7 @@ class FedMeta(flwr.server.strategy.FedAvg):
             gradients_aggregated=gradients_aggregated,
             weight_decay=1e-4,
         )
-        parameters_aggregated = weights_prime
+        parameters_aggregated = ndarrays_to_parameters(weights_prime)
 
         # Metrics
         metrics_aggregated = {}
@@ -138,76 +155,75 @@ class FedMeta(flwr.server.strategy.FedAvg):
             fit_metrics = [(res.num_examples, res.metrics) for _, res in results]
             metrics_aggregated = self.fit_metrics_aggregation_fn(fit_metrics)
 
-        return self.net.get_parameters(), metrics_aggregated
+        return parameters_aggregated, metrics_aggregated
 
-    def configure_evaluate(
-        self, server_round: int, parameters: Parameters, client_manager: ClientManager
-    ) -> List[Tuple[ClientProxy, EvaluateIns]]:
-        """Configure the next round of evaluation."""
-        # Do not configure federated evaluation if fraction eval is 0.
-        if self.fraction_evaluate == 0.0:
-            return []
+    # def configure_evaluate(
+    #     self, server_round: int, parameters: Parameters, client_manager: ClientManager
+    # ) -> List[Tuple[ClientProxy, EvaluateIns]]:
+    #     """Configure the next round of evaluation."""
+    #     # Do not configure federated evaluation if fraction eval is 0.
+    #     if self.fraction_evaluate == 0.0:
+    #         return []
 
-        # Parameters and config
-        config = {}
-        if self.on_evaluate_config_fn is not None:
-            # Custom evaluation config function provided
-            config = self.on_evaluate_config_fn(server_round)
-        config["alpha"] = self.alpha
-        evaluate_ins = EvaluateIns(parameters, config)
+    #     # Parameters and config
+    #     config = {}
+    #     if self.on_evaluate_config_fn is not None:
+    #         # Custom evaluation config function provided
+    #         config = self.on_evaluate_config_fn(server_round)
+    #     config["alpha"] = self.alpha
+    #     evaluate_ins = EvaluateIns(parameters, config)
 
-        # Sample clients
-        sample_size, min_num_clients = self.num_evaluation_clients(
-            client_manager.num_available()
-        )
-        clients = client_manager.sample(
-            num_clients=sample_size, min_num_clients=min_num_clients
-        )
+    #     # Sample clients
+    #     sample_size, min_num_clients = self.num_evaluation_clients(
+    #         client_manager.num_available()
+    #     )
+    #     clients = client_manager.sample(
+    #         num_clients=sample_size, min_num_clients=min_num_clients
+    #     )
 
-        # Return client/config pairs
-        return [(client, evaluate_ins) for client in clients]
+    #     # Return client/config pairs
+    #     return [(client, evaluate_ins) for client in clients]
 
-    def aggregate_evaluate(
-        self,
-        server_round: int,
-        results: List[Tuple[ClientProxy, EvaluateRes]],
-        failures: List[Union[Tuple[ClientProxy, EvaluateRes], BaseException]],
-    ) -> Tuple[Optional[float], Dict[str, Scalar]]:
-        """Aggregate evaluation losses using weighted average."""
-        if not results:
-            return None, {}
-        # Do not aggregate if there are failures and failures are not accepted
-        if not self.accept_failures and failures:
-            return None, {}
+    # def aggregate_evaluate(
+    #     self,
+    #     server_round: int,
+    #     results: List[Tuple[ClientProxy, EvaluateRes]],
+    #     failures: List[Union[Tuple[ClientProxy, EvaluateRes], BaseException]],
+    # ) -> Tuple[Optional[float], Dict[str, Scalar]]:
+    #     """Aggregate evaluation losses using weighted average."""
+    #     for failure in failures:
+    #         print(f"Evaluate Failure: {failure}")
+    #     if not results:
+    #         return None, {}
+    #     # Do not aggregate if there are failures and failures are not accepted
+    #     if not self.accept_failures and failures:
+    #         return None, {}
 
-        # Aggregate loss
-        loss_aggregated = weighted_loss_avg(
-            [
-                (evaluate_res.num_examples, evaluate_res.loss)
-                for _, evaluate_res in results
-            ]
-        )
+    #     # Aggregate loss
+    #     loss_aggregated = weighted_loss_avg(
+    #         [
+    #             (evaluate_res.num_examples, evaluate_res.loss)
+    #             for _, evaluate_res in results
+    #         ]
+    #     )
 
-        if self.data == "femnist":
-            smoothing_weight = 0.95
-        else:
-            smoothing_weight = 0.7
-        self.ema_loss = update_ema(self.ema_loss, loss_aggregated, smoothing_weight)
-        loss_aggregated = self.ema_loss
+    #     smoothing_weight = 0.7
+    #     self.ema_loss = update_ema(self.ema_loss, loss_aggregated, smoothing_weight)
+    #     loss_aggregated = self.ema_loss
 
-        # Aggregate custom metrics if aggregation fn was provided
-        metrics_aggregated = {}
-        if self.evaluate_metrics_aggregation_fn:
-            eval_metrics = [(res.num_examples, res.metrics) for _, res in results]
-            metrics_aggregated = self.evaluate_metrics_aggregation_fn(eval_metrics)
-            self.ema_acc = update_ema(
-                self.ema_acc,
-                round(float(metrics_aggregated["accuracy"] * 100), 3),
-                smoothing_weight,
-            )
-            metrics_aggregated["accuracy"] = self.ema_acc
+    #     # Aggregate custom metrics if aggregation fn was provided
+    #     metrics_aggregated = {}
+    #     if self.evaluate_metrics_aggregation_fn:
+    #         eval_metrics = [(res.num_examples, res.metrics) for _, res in results]
+    #         metrics_aggregated = self.evaluate_metrics_aggregation_fn(eval_metrics)
+    #         self.ema_acc = update_ema(
+    #             self.ema_acc,
+    #             round(float(metrics_aggregated["accuracy"] * 100), 3),
+    #             smoothing_weight,
+    #         )
+    #         metrics_aggregated["accuracy"] = self.ema_acc
 
-        return loss_aggregated, metrics_aggregated
+    #     return loss_aggregated, metrics_aggregated
 
 
 #########################
@@ -270,6 +286,7 @@ def generate_client_fn(context, files, test_file):
             model,
             dataset,
             context,
+            client_name=cid,
             lr=LEARNING_RATE,
             pre_train_lr=PRE_TRAIN_LEARNING_RATE,
             epochs=NUM_EPOCHS,
