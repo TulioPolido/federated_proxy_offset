@@ -1,14 +1,27 @@
-from typing import List, Tuple
 from collections import OrderedDict
+from typing import Dict, List, Optional, Tuple, Union
 from flautim.pytorch.common import run_federated, weighted_average
 import SmellRecurrenceModel
 import SmellRecurrenceDataset
 import SmellRecurrenceExperiment
 import flwr
 import torch
-from flwr.common import ndarrays_to_parameters, parameters_to_ndarrays,NDArrays
+from flwr.common import (
+    EvaluateIns,
+    EvaluateRes,
+    FitIns,
+    FitRes,
+    Metrics,
+    NDArrays,
+    Parameters,
+    Scalar,
+    ndarrays_to_parameters,
+    parameters_to_ndarrays,
+)
+from flwr.server.client_manager import ClientManager
+from flwr.server.client_proxy import ClientProxy
 from flwr.server import ServerConfig, ServerAppComponents
-from flwr.server.strategy.aggregate import aggregate
+from flwr.server.strategy.aggregate import aggregate, weighted_loss_avg
 import flautim as fl
 import random
 
@@ -18,6 +31,21 @@ BATCH_SIZE = 16
 NUM_ROUNDS = 5
 NUM_EPOCHS = 1
 EMB_DIM = 64
+
+######################################
+# FEDMETA
+######################################
+
+
+def update_ema(
+    prev_ema: float,
+    current_value: float,
+    smoothing_weight: float,
+) -> float:
+    if prev_ema is None:
+        return current_value
+    return (1 - smoothing_weight) * current_value + smoothing_weight * prev_ema
+
 
 def fedmeta_update_maml(
     net: torch.nn.Module,
@@ -41,51 +69,150 @@ def fedmeta_update_maml(
     return weights_prime
 
 
-
 class FedMeta(flwr.server.strategy.FedAvg):
     """Federated Meta-Learning Strategy (MAML-style)."""
 
-    def __init__(self, model, lr_outer=0.001, **kwargs):
+    def __init__(self, model, lr_inner=1e-4, lr_outer=1e-4, **kwargs):
         super().__init__(**kwargs)  # forward other FedAvg args
-        self.global_model = model
-        self.lr_outer = lr_outer
-        
+        self.net = model
+        self.beta = lr_outer
+        self.alpha = torch.nn.ParameterList(
+            [
+                torch.nn.Parameter(torch.full_like(p, lr_inner))
+                for p in self.net.parameters()
+            ]
+        )
+
+    def configure_fit(
+        self, server_round: int, parameters: Parameters, client_manager: ClientManager
+    ) -> List[Tuple[ClientProxy, FitIns]]:
+        """Configure the next round of training."""
+        if self.on_fit_config_fn is not None:
+            # Custom fit config function provided
+            config = self.on_fit_config_fn(server_round)
+        config["alpha"] = self.alpha
+        fit_ins = FitIns(parameters, config)
+
+        # Sample clients
+        sample_size, min_num_clients = self.num_fit_clients(
+            client_manager.num_available()
+        )
+        clients = client_manager.sample(
+            num_clients=sample_size, min_num_clients=min_num_clients
+        )
+
+        # Return client/config pairs
+        return [(client, fit_ins) for client in clients]
+
     def aggregate_fit(self, server_round, results, failures):
         if not results:
             return None, {}
 
         if not self.accept_failures and failures:
             return None, {}
-        
-                # Convert results
+
+        # Convert results
         weights_results: List[Tuple[NDArrays, int]] = [
             (parameters_to_ndarrays(fit_res.parameters), fit_res.num_examples)
             for _, fit_res in results
         ]
-
 
         grads_results: List[Tuple[NDArrays, int]] = [
             (fit_res.metrics["grads"], fit_res.num_examples)  # type: ignore
             for _, fit_res in results
         ]
         gradients_aggregated = aggregate(grads_results)
+
         weights_prime = fedmeta_update_maml(
-            net=self.global_model,
-            beta=self.lr_outer,
+            net=self.net,
+            beta=self.beta,
             weights_results=weights_results[0][0],
             gradients_aggregated=gradients_aggregated,
-            weight_decay=0.0001,
+            weight_decay=1e-4,
         )
         parameters_aggregated = weights_prime
 
-        # Aggregate custom metrics if aggregation fn was provided
+        # Metrics
         metrics_aggregated = {}
         if self.fit_metrics_aggregation_fn:
             fit_metrics = [(res.num_examples, res.metrics) for _, res in results]
             metrics_aggregated = self.fit_metrics_aggregation_fn(fit_metrics)
 
-        return ndarrays_to_parameters(parameters_aggregated), metrics_aggregated
+        return self.net.get_parameters(), metrics_aggregated
 
+    def configure_evaluate(
+        self, server_round: int, parameters: Parameters, client_manager: ClientManager
+    ) -> List[Tuple[ClientProxy, EvaluateIns]]:
+        """Configure the next round of evaluation."""
+        # Do not configure federated evaluation if fraction eval is 0.
+        if self.fraction_evaluate == 0.0:
+            return []
+
+        # Parameters and config
+        config = {}
+        if self.on_evaluate_config_fn is not None:
+            # Custom evaluation config function provided
+            config = self.on_evaluate_config_fn(server_round)
+        config["alpha"] = self.alpha
+        evaluate_ins = EvaluateIns(parameters, config)
+
+        # Sample clients
+        sample_size, min_num_clients = self.num_evaluation_clients(
+            client_manager.num_available()
+        )
+        clients = client_manager.sample(
+            num_clients=sample_size, min_num_clients=min_num_clients
+        )
+
+        # Return client/config pairs
+        return [(client, evaluate_ins) for client in clients]
+
+    def aggregate_evaluate(
+        self,
+        server_round: int,
+        results: List[Tuple[ClientProxy, EvaluateRes]],
+        failures: List[Union[Tuple[ClientProxy, EvaluateRes], BaseException]],
+    ) -> Tuple[Optional[float], Dict[str, Scalar]]:
+        """Aggregate evaluation losses using weighted average."""
+        if not results:
+            return None, {}
+        # Do not aggregate if there are failures and failures are not accepted
+        if not self.accept_failures and failures:
+            return None, {}
+
+        # Aggregate loss
+        loss_aggregated = weighted_loss_avg(
+            [
+                (evaluate_res.num_examples, evaluate_res.loss)
+                for _, evaluate_res in results
+            ]
+        )
+
+        if self.data == "femnist":
+            smoothing_weight = 0.95
+        else:
+            smoothing_weight = 0.7
+        self.ema_loss = update_ema(self.ema_loss, loss_aggregated, smoothing_weight)
+        loss_aggregated = self.ema_loss
+
+        # Aggregate custom metrics if aggregation fn was provided
+        metrics_aggregated = {}
+        if self.evaluate_metrics_aggregation_fn:
+            eval_metrics = [(res.num_examples, res.metrics) for _, res in results]
+            metrics_aggregated = self.evaluate_metrics_aggregation_fn(eval_metrics)
+            self.ema_acc = update_ema(
+                self.ema_acc,
+                round(float(metrics_aggregated["accuracy"] * 100), 3),
+                smoothing_weight,
+            )
+            metrics_aggregated["accuracy"] = self.ema_acc
+
+        return loss_aggregated, metrics_aggregated
+
+
+#########################
+# SIMULATION
+#########################
 
 
 def fit_config(server_round):
@@ -136,7 +263,7 @@ def generate_client_fn(context, files, test_file):
             use_erase=False,
             use_jitter=False,
             use_rotation=True,
-            num_workers=0
+            num_workers=0,
         )
 
         return SmellRecurrenceExperiment.RecurrenceExperiment(
@@ -149,7 +276,7 @@ def generate_client_fn(context, files, test_file):
             weight_decay=WEIGHT_DECAY,
             lr_step=LEARNING_RATE_STEP,
             lr_gamma=LEARNING_RATE_GAMMA,
-            embedding_size=EMB_DIM
+            embedding_size=EMB_DIM,
             # pre_train=True
         ).to_client()
 

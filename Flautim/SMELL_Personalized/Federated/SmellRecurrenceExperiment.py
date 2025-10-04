@@ -7,7 +7,13 @@ import torch.nn.functional as F
 import random
 import torch.nn as nn
 from torch.optim.lr_scheduler import StepLR
-from torchmetrics.classification import MulticlassAccuracy, MulticlassPrecision, MulticlassRecall, MulticlassF1Score, MulticlassConfusionMatrix
+from torchmetrics.classification import (
+    MulticlassAccuracy,
+    MulticlassPrecision,
+    MulticlassRecall,
+    MulticlassF1Score,
+    MulticlassConfusionMatrix,
+)
 from sklearn.neighbors import KNeighborsClassifier
 import flautim as fl
 from flwr.common.typing import NDArrays, Scalar
@@ -34,8 +40,7 @@ class PrototypicalCenterLoss(nn.Module):
 
         # Initialize class prototypes (centers) as learnable parameters
         self.prototypes = nn.Parameter(
-            torch.randn(num_classes, embedding_size),
-            requires_grad=True
+            torch.randn(num_classes, embedding_size), requires_grad=True
         )  # create a parameter tensor of shape (num_classes, embedding_size)
         # The function is to make each 'prototype' as a possible center of one class
 
@@ -57,7 +62,10 @@ class PrototypicalCenterLoss(nn.Module):
 
         # Optionally, add inter-class loss (encourage prototypes to be apart)
         inter_class_distances = torch.cdist(self.prototypes, self.prototypes)
-        inter_class_distances = inter_class_distances + torch.eye(self.num_classes, device=embeddings.device) * 1e12  # Prevent self-comparison
+        inter_class_distances = (
+            inter_class_distances
+            + torch.eye(self.num_classes, device=embeddings.device) * 1e12
+        )  # Prevent self-comparison
 
         # Apply margin: penalize if prototypes are closer than the margin
         loss_inter = torch.mean(F.relu(self.margin - inter_class_distances))
@@ -67,7 +75,14 @@ class PrototypicalCenterLoss(nn.Module):
 
 
 class LearnablePrototypicalLossWithDiversityRegularization(nn.Module):
-    def __init__(self, embedding_dim, num_similar_prototypes, num_dissimilar_prototypes, margin=1.0, lambda_reg=0.01):
+    def __init__(
+        self,
+        embedding_dim,
+        num_similar_prototypes,
+        num_dissimilar_prototypes,
+        margin=1.0,
+        lambda_reg=0.01,
+    ):
         """
         Initialize the Prototypical Loss function with diversity regularization.
         paper : A New Similarity Space Tailored for Supervised Deep Metric Learning
@@ -85,17 +100,17 @@ class LearnablePrototypicalLossWithDiversityRegularization(nn.Module):
             torch.cat(
                 (
                     torch.zeros(1, embedding_dim),
-                    torch.randn(num_similar_prototypes-1, embedding_dim)
+                    torch.randn(num_similar_prototypes - 1, embedding_dim),
                 ),
-                dim=0
+                dim=0,
             ),
-            requires_grad=True
+            requires_grad=True,
         )
 
         # starts the dissimilar prototypes as all random + 2.0
         self.dissimilar_prototypes = nn.Parameter(
             torch.randn(num_dissimilar_prototypes, embedding_dim) + 2.0,
-            requires_grad=True
+            requires_grad=True,
         )
         self.margin = margin
         self.lambda_reg = lambda_reg
@@ -107,8 +122,12 @@ class LearnablePrototypicalLossWithDiversityRegularization(nn.Module):
         # Detach the tensor first to prevent in-place modification errors
         with torch.no_grad():
             # Set the requires_grad for a specific vector at index
-            self.similar_prototypes.data[index] = self.similar_prototypes.data[index].requires_grad_(requires_grad_value)
-            self.dissimilar_prototypes.data[index] = self.dissimilar_prototypes.data[index].requires_grad_(requires_grad_value)
+            self.similar_prototypes.data[index] = self.similar_prototypes.data[
+                index
+            ].requires_grad_(requires_grad_value)
+            self.dissimilar_prototypes.data[index] = self.dissimilar_prototypes.data[
+                index
+            ].requires_grad_(requires_grad_value)
 
     def diversity_regularization(self, prototypes):
         """
@@ -140,27 +159,39 @@ class LearnablePrototypicalLossWithDiversityRegularization(nn.Module):
         s_ij = s_ij.unsqueeze(1)  # Shape: [batch_size, 1, embedding_dim]
 
         # Compute distances to all similar prototypes
-        dist_to_similar_prototypes = torch.cdist(s_ij, self.similar_prototypes.unsqueeze(0), p=2).squeeze(1)
-        dist_to_dissimilar_prototypes = torch.cdist(s_ij, self.dissimilar_prototypes.unsqueeze(0), p=2).squeeze(1)
+        dist_to_similar_prototypes = torch.cdist(
+            s_ij, self.similar_prototypes.unsqueeze(0), p=2
+        ).squeeze(1)
+        dist_to_dissimilar_prototypes = torch.cdist(
+            s_ij, self.dissimilar_prototypes.unsqueeze(0), p=2
+        ).squeeze(1)
 
         # Compute similarity scores using the given formula
         similarity_similar = torch.pow(1 + torch.pow(dist_to_similar_prototypes, 2), -1)
-        similarity_dissimilar = torch.pow(1 + torch.pow(dist_to_dissimilar_prototypes, 2), -1)
+        similarity_dissimilar = torch.pow(
+            1 + torch.pow(dist_to_dissimilar_prototypes, 2), -1
+        )
 
         # Normalization step: Sum of similarities for each prototype set
         denom_similar = torch.sum(similarity_similar, dim=1, keepdim=True)
         denom_dissimilar = torch.sum(similarity_dissimilar, dim=1, keepdim=True)
 
         # Normalize similarity scores
-        similarity_similar_normalized = (similarity_similar / (denom_similar + denom_dissimilar))
-        similarity_dissimilar_normalized = (similarity_dissimilar / (denom_similar + denom_dissimilar))
+        similarity_similar_normalized = similarity_similar / (
+            denom_similar + denom_dissimilar
+        )
+        similarity_dissimilar_normalized = similarity_dissimilar / (
+            denom_similar + denom_dissimilar
+        )
 
         # Calculate the loss:
         # If label == 1 (similar), minimize distance to similar prototypes
         # If label == 0 (dissimilar), minimize distance to dissimilar prototypes
         loss = -torch.mean(
             label * torch.log(torch.sum(similarity_similar_normalized, dim=1))
-            + (1 - label) * torch.log(torch.sum(similarity_dissimilar_normalized, dim=1)))
+            + (1 - label)
+            * torch.log(torch.sum(similarity_dissimilar_normalized, dim=1))
+        )
 
         total_loss = loss
 
@@ -176,12 +207,17 @@ class LearnablePrototypicalLossWithDiversityRegularization(nn.Module):
 
     def compute_norms(self):
         # Compute norms for the similar prototypes
-        similar_norms = torch.norm(self.similar_prototypes, dim=1)  # Compute L2 norm for each vector
+        similar_norms = torch.norm(
+            self.similar_prototypes, dim=1
+        )  # Compute L2 norm for each vector
 
         # Compute norms for the dissimilar prototypes
-        dissimilar_norms = torch.norm(self.dissimilar_prototypes, dim=1)  # Compute L2 norm for each vector
+        dissimilar_norms = torch.norm(
+            self.dissimilar_prototypes, dim=1
+        )  # Compute L2 norm for each vector
 
         return similar_norms, dissimilar_norms
+
 
 ###############################
 # EXPERIMENT
@@ -204,10 +240,9 @@ class RecurrenceExperiment(Experiment):
         embedding_size=64,
         margin=1.0,
         # pre_train=False,
-        **kwargs
+        **kwargs,
     ):
-        super(RecurrenceExperiment, self)\
-            .__init__(model, dataset, context, **kwargs)
+        super(RecurrenceExperiment, self).__init__(model, dataset, context, **kwargs)
 
         # self.pre_train = pre_train
         self.epochs = epochs
@@ -227,24 +262,23 @@ class RecurrenceExperiment(Experiment):
         self.criterion = LearnablePrototypicalLossWithDiversityRegularization(
             embedding_dim=self.embedding_size,
             num_similar_prototypes=2,
-            num_dissimilar_prototypes=2
+            num_dissimilar_prototypes=2,
         ).to(self.device)
         self.optimizer1 = torch.optim.Adam(
-            list(self.criterion.parameters()),
-            lr=self.lr
+            list(self.criterion.parameters()), lr=self.lr
         )
         self.optimizer2 = torch.torch.optim.SGD(
-            [{'params': self.model.parameters(), 'lr': self.lr}]
-            + [{'params': self.criterion.parameters(), 'lr': self.lr}]
+            [{"params": self.model.parameters(), "lr": self.lr}]
+            + [{"params": self.criterion.parameters(), "lr": self.lr}]
         )
         self.pre_criterion = PrototypicalCenterLoss(
             num_classes=self.num_classes,
             embedding_size=self.embedding_size,
-            margin=self.margin
+            margin=self.margin,
         ).to(self.device)
         self.pre_optimizer = torch.optim.Adam(
             list(model.parameters()) + list(self.pre_criterion.parameters()),
-            lr=self.pre_train_lr
+            lr=self.pre_train_lr,
         )
 
         self.scheduler = StepLR(self.optimizer1, step_size=lr_step, gamma=lr_gamma)
@@ -256,14 +290,12 @@ class RecurrenceExperiment(Experiment):
     def set_parameters(self, parameters: NDArrays) -> None:
         """Change the parameters of the model using the given ones."""
         params_dict = zip(self.model.state_dict().keys(), parameters)
-        device = next(self.model.parameters()).device
-        state_dict = OrderedDict({k: torch.tensor(v, device=device) for k, v in params_dict})
+        state_dict = OrderedDict({k: torch.Tensor(v) for k, v in params_dict})
         self.model.load_state_dict(state_dict, strict=True)
 
-
-################################
-# TRAINING FUNCTIONS ######
-################################
+    ################################
+    # TRAINING FUNCTIONS ######
+    ################################
 
     def pretrain_model_prototypical_center(self, model, dataloader, num_epochs):
 
@@ -300,7 +332,10 @@ class RecurrenceExperiment(Experiment):
         num_different_label_pairs = N // 2
 
         # Precompute label indices
-        label_to_indices = {label.item(): (Y == label).nonzero(as_tuple=True)[0].tolist() for label in torch.unique(Y)}
+        label_to_indices = {
+            label.item(): (Y == label).nonzero(as_tuple=True)[0].tolist()
+            for label in torch.unique(Y)
+        }
 
         X1, X2, labels = [], [], []
 
@@ -340,17 +375,21 @@ class RecurrenceExperiment(Experiment):
 
         return X1, X2, labels
 
-    def train_model_with_dynamic_lr(self, model, train_loader, lr, num_epochs=1):
+    def train_model_with_dynamic_lr(self, model, train_loader, alpha, num_epochs=1):
         for _ in range(num_epochs):
             loss_sum = 0.0
             sup_num_sample = []
             sup_total_loss = []
             for batch_data, batch_labels in train_loader:
-                pairs1, pairs2, labels = self.generate_pairs(batch_data.to(self.device), batch_labels.to(self.device), 200)
+                pairs1, pairs2, labels = self.generate_pairs(
+                    batch_data.to(self.device), batch_labels.to(self.device), 200
+                )
                 embeddings_x1 = model(pairs1.float())
                 embeddings_x2 = model(pairs2.float())
 
-                loss = self.criterion(embeddings_x1, embeddings_x2, labels.to(self.device))
+                loss = self.criterion(
+                    embeddings_x1, embeddings_x2, labels.to(self.device)
+                )
                 loss_sum += loss * labels.size(0)
                 sup_num_sample.append(labels.size(0))
                 sup_total_loss.append(loss * labels.size(0))
@@ -359,12 +398,12 @@ class RecurrenceExperiment(Experiment):
                     loss, list(model.parameters()), create_graph=False
                 )
 
-                for param, grad_ in zip(model.parameters(), grads):
-                    param.data = param.data - lr * grad_
+                for param, grad_, alphas in zip(model.parameters(), grads, alpha):
+                    param.data = param.data - alphas * grad_
 
                 for param in model.parameters():
                     if param.grad is not None:
-                            param.grad.zero_()
+                        param.grad.zero_()
 
         loss = sum(sup_total_loss) / sum(sup_num_sample)
         return loss
@@ -376,10 +415,18 @@ class RecurrenceExperiment(Experiment):
         loss_sum = 0.0
 
         for batch_data, batch_labels in query_loader:
-            batch_data, batch_labels = batch_data.to(self.device), batch_labels.to(self.device)
+            batch_data, batch_labels = batch_data.to(self.device), batch_labels.to(
+                self.device
+            )
             # Generate pairs for loss computation
-            pairs_1, pairs_2, labels = self.generate_pairs(batch_data, batch_labels, num_samples_for_pairs)
-            pairs_1, pairs_2, labels = pairs_1.to(self.device), pairs_2.to(self.device), labels.to(self.device)
+            pairs_1, pairs_2, labels = self.generate_pairs(
+                batch_data, batch_labels, num_samples_for_pairs
+            )
+            pairs_1, pairs_2, labels = (
+                pairs_1.to(self.device),
+                pairs_2.to(self.device),
+                labels.to(self.device),
+            )
             # Forward pass
             embeddings_x1 = model(pairs_1)
             embeddings_x2 = model(pairs_2)
@@ -400,35 +447,61 @@ class RecurrenceExperiment(Experiment):
         grads = [grad_.cpu().numpy() for grad_ in grads]
         return grads
 
-    def fit(self, parameters, config):
-        return_dic = {}
-        self.log("FedMeta client training started", details="", object="", object_id=self.id)
-        self.epoch_fl = config["server_round"]
-        
-        # === Load global model ===
-        self.model.set_parameters(parameters)
+    def fit(  # type: ignore
+        self, parameters: NDArrays, config: Dict[str, Scalar]
+    ) -> Tuple[NDArrays, int, Dict]:
+        try:
+            alpha = config["alpha"]
+            self.log(
+                "FedMeta client training started",
+                details="",
+                object="",
+                object_id=self.id,
+            )
+            self.epoch_fl = config["server_round"]
 
-        # === Use provided splits ===
-        support_loader, query_loader = self.dataset.dataloader(validation=False)
-        total_len = len(support_loader.dataset) + len(query_loader.dataset)
+            # === Load global model ===
+            self.model.set_parameters(parameters)
 
-        # === Inner loop: adapt model on support (train set) ===
-        self.adapted_model = copy.deepcopy(self.model).to(self.device)
+            # === Use provided splits ===
+            support_loader, query_loader = self.dataset.dataloader(validation=False)
+            total_len = len(support_loader.dataset) + len(query_loader.dataset)
 
-        loss = self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.lr, self.epochs)
+            # === Inner loop: adapt model on support (train set) ===
+            self.adapted_model = copy.deepcopy(self.model).to(self.device)
 
-        # === Outer loop: compute query loss on adapted model ===
-        grads = self.compute_query_loss(self.adapted_model, query_loader)
+            loss = self.train_model_with_dynamic_lr(
+                self.adapted_model, support_loader, alpha, self.epochs
+            )
 
-        self.log("FedMeta client finished", details="", object="", object_id=self.id)
+            # === Outer loop: compute query loss on adapted model ===
+            grads = self.compute_query_loss(  # type: ignore
+                self.adapted_model, query_loader
+            )
 
-        return self.model.get_parameters(), total_len, {"loss": loss.item(), "grads": grads}
+            self.log(
+                "FedMeta client finished", details="", object="", object_id=self.id
+            )
 
-################################
-# TESTING  FUNCTIONS ######
-################################
+            # grads is already a list of numpy arrays
+            return (
+                self.model.get_parameters(),
+                total_len,
+                {"loss": loss.item(), "grads": grads},
+            )
+        except Exception as e:
+            import traceback
 
-    def knn_in_embedding_space(self, model, train_loader, test_loader, k=1, num_samples_for_pairs=20):
+            self.log(f"Exception in fit(): {e}\n{traceback.format_exc()}")
+            raise
+
+    ################################
+    # TESTING  FUNCTIONS ######
+    ################################
+
+    def knn_in_embedding_space(
+        self, model, train_loader, test_loader, k=1, num_samples_for_pairs=20
+    ):
 
         model.eval()
 
@@ -473,8 +546,14 @@ class RecurrenceExperiment(Experiment):
                 # Compute loss based on pairs in the test set
 
                 # Generate pairs for loss computation
-                pairs_1, pairs_2, labels = self.generate_pairs(batch_data, batch_labels, num_samples_for_pairs)
-                pairs_1, pairs_2, labels = pairs_1.to(self.device), pairs_2.to(self.device), labels.to(self.device)
+                pairs_1, pairs_2, labels = self.generate_pairs(
+                    batch_data, batch_labels, num_samples_for_pairs
+                )
+                pairs_1, pairs_2, labels = (
+                    pairs_1.to(self.device),
+                    pairs_2.to(self.device),
+                    labels.to(self.device),
+                )
 
                 # Compute embeddings for pairs
                 embeddings_x1 = model(pairs_1)
@@ -491,7 +570,7 @@ class RecurrenceExperiment(Experiment):
         else:
             avg_loss = 0.0
 
-        print(f'Average loss on test set: {avg_loss:.4f}')
+        print(f"Average loss on test set: {avg_loss:.4f}")
 
         # Convert predictions and true labels to tensors for consistency
         y_pred = torch.tensor(all_preds)
@@ -504,13 +583,25 @@ class RecurrenceExperiment(Experiment):
         model.to(self.device)
         model.eval()
 
-        accuracy = MulticlassAccuracy(num_classes=self.num_classes, average='macro').to(self.device)
-        precision = MulticlassPrecision(num_classes=self.num_classes, average='macro').to(self.device)
-        recall = MulticlassRecall(num_classes=self.num_classes, average='macro').to(self.device)
-        f1 = MulticlassF1Score(num_classes=self.num_classes, average='macro').to(self.device)
-        conf_matrix = MulticlassConfusionMatrix(num_classes=self.num_classes).to(self.device)
+        accuracy = MulticlassAccuracy(num_classes=self.num_classes, average="macro").to(
+            self.device
+        )
+        precision = MulticlassPrecision(
+            num_classes=self.num_classes, average="macro"
+        ).to(self.device)
+        recall = MulticlassRecall(num_classes=self.num_classes, average="macro").to(
+            self.device
+        )
+        f1 = MulticlassF1Score(num_classes=self.num_classes, average="macro").to(
+            self.device
+        )
+        conf_matrix = MulticlassConfusionMatrix(num_classes=self.num_classes).to(
+            self.device
+        )
 
-        loss, predicted, label = self.knn_in_embedding_space(model, trainloader, testloader)
+        loss, predicted, label = self.knn_in_embedding_space(
+            model, trainloader, testloader
+        )
         predicted = torch.tensor(predicted).to(self.device)
         label = torch.tensor(label).to(self.device)
 
@@ -528,19 +619,80 @@ class RecurrenceExperiment(Experiment):
 
         return float(loss), acc, prec, rec, f1_score, conf
 
-    def validation_loop(self, data_loaders):
+    def validation_loop(self, data_loaders, alpha):
         support_loader, query_loader = data_loaders
 
         # ---- Inner loop adaptation ----
         self.adapted_model = copy.deepcopy(self.model).to(self.device)
-        loss = self.train_model_with_dynamic_lr(self.adapted_model, support_loader, self.lr, self.epochs)
+        loss = self.train_model_with_dynamic_lr(
+            self.adapted_model, support_loader, alpha, self.epochs
+        )
 
         # ---- Evaluate adapted model on query set ----
-        loss_avg, acc, prec, rec, f1, conf = self.test(self.adapted_model, support_loader, query_loader)
+        loss_avg, acc, prec, rec, f1, conf = self.test(
+            self.adapted_model, support_loader, query_loader
+        )
 
         return loss_avg, {
             "TEST_ACC": acc,
             "TEST_PREC": prec,
             "Recall": rec,
-            "TEST_F1": f1
+            "TEST_F1": f1,
         }
+
+    def evaluate(  # type: ignore
+        self, parameters: NDArrays, config: Dict[str, Scalar]
+    ) -> Tuple[float, int, Dict]:
+        try:
+            alpha = config["alpha"]
+            return_dic = {}
+
+            self.log(
+                f"FedMeta Model evaluation started",
+                details="",
+                object="experiment_evaluate",
+                object_id=self.id,
+            )
+
+            # self.log(f"Params size: {len(parameters)}")
+            # self.log(f"Params type: {type(parameters[0])}")
+            self.model.set_parameters(parameters)
+
+            self.epoch_fl = config["server_round"]
+
+            loss, values_metrics_validation = self.validation_loop(
+                self.dataset.dataloader(validation=True), alpha
+            )
+            values_metrics_validation["LOSS"] = loss
+
+            self.log(
+                "Model training finished", details="", object="experiment_evaluate"
+            )
+
+            self.log(
+                f"Mesure: " + "metrics." + str(values_metrics_validation),
+                details="",
+                object="",
+                object_id=self.id,
+            )
+
+            for name in values_metrics_validation:
+                # self.log(f"Mesure: "+ 'metrics.' + str(name) , details="", object="", object_id=self.id)
+                self.measures.log(
+                    self,
+                    name,
+                    values_metrics_validation[name],
+                    validation=True,
+                    epoch=self.epoch_fl,
+                )
+                return_dic[name] = float(values_metrics_validation[name])
+
+            self.model.save()
+
+            return (
+                float(loss),
+                len(self.dataset.dataloader(validation=True)),
+                return_dic,
+            )
+        except Exception as e:
+            self.log(f"Error in client evaluate: {e}")
