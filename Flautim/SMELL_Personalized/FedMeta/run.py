@@ -31,7 +31,7 @@ import random
 DATASET = "PAMAP"
 NUM_CHANNELS = 6
 BATCH_SIZE = 16
-NUM_ROUNDS = 5
+NUM_ROUNDS = 50
 NUM_EPOCHS = 1
 EMB_DIM = 64
 
@@ -279,7 +279,7 @@ def generate_client_fn(context, files, test_file):
             use_erase=False,
             use_jitter=False,
             use_rotation=True,
-            # num_workers=0,
+            num_workers=0,
         )
 
         return SmellRecurrenceExperiment.RecurrenceExperiment(

@@ -589,6 +589,9 @@ class RecurrenceExperiment(Experiment):
 
     def validation_loop(self, data_loaders):
         train_loader, test_loader = data_loaders
+        self.pretrain_model_prototypical_center(train_loader, 1)
+        loss_avg1 = self.train_model_with_dynamic_lr(train_loader, self.optimizer1, 1)
+        loss_avg2 = self.train_model_with_dynamic_lr(train_loader, self.optimizer2, 1)
         loss_avg, acc, prec, rec, f1, conf_matrix = self.test(train_loader, test_loader)
         return loss_avg, {
             "TEST_ACC": acc,
