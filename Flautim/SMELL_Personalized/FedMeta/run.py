@@ -31,7 +31,7 @@ import random
 DATASET = "PAMAP"
 NUM_CHANNELS = 6
 BATCH_SIZE = 16
-NUM_ROUNDS = 35
+NUM_ROUNDS = 3
 NUM_EPOCHS = 1
 EMB_DIM = 64
 
@@ -57,17 +57,21 @@ def fedmeta_update_maml(
     gradients_aggregated: NDArrays,
     weight_decay: float,
 ) -> NDArrays:
+    
     params_dict = zip(net.state_dict().keys(), weights_results)
     state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
     net.load_state_dict(state_dict, strict=True)
     optimizer = torch.optim.Adam(
         list(net.parameters()), lr=beta, weight_decay=weight_decay
     )
+    log(INFO, f"Net params before: {net.parameters()}")
     for params, grad_ins in zip(net.parameters(), gradients_aggregated):
         params.grad = torch.tensor(grad_ins).to(params.dtype)
+
     optimizer.step()
     optimizer.zero_grad()
     weights_prime = [val.cpu().numpy() for _, val in net.state_dict().items()]
+    log(INFO, f"Net params after: {net.parameters()}")
 
     return weights_prime
 
@@ -139,6 +143,7 @@ class FedMeta(flwr.server.strategy.FedAvg):
 
         # Aggregate gradients
         gradients_aggregated = aggregate(grads_results)
+        log(INFO, f"Grads: {gradients_aggregated}")
 
         weights_prime = fedmeta_update_maml(
             net=self.net,
