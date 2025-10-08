@@ -111,9 +111,9 @@ if __name__ == "__main__":
             LEARNING_RATE_STEP = 3
             LEARNING_RATE_GAMMA = 0.5
             WEIGHT_DECAY = 6.7e-5
-            AUGMENT = 2
+            AUGMENT = 0
             FRACTION_FIT = 0.4
-            FRACTION_EVALUATE = 0.4
+            FRACTION_EVALUATE = 0.3
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 

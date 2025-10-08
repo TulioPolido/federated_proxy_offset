@@ -7,7 +7,7 @@ import SmellRecurrenceDataset
 import SmellRecurrenceExperiment
 import flwr
 import torch
-from logging import INFO
+from logging import INFO, ERROR
 from flwr.common.logger import log
 from flwr.common import (
     EvaluateIns,
@@ -31,7 +31,7 @@ import random
 DATASET = "PAMAP"
 NUM_CHANNELS = 6
 BATCH_SIZE = 16
-NUM_ROUNDS = 50
+NUM_ROUNDS = 35
 NUM_EPOCHS = 1
 EMB_DIM = 64
 
@@ -110,7 +110,7 @@ class FedMeta(flwr.server.strategy.FedAvg):
 
     def aggregate_fit(self, server_round, results, failures):
         for failure in failures:
-            print(f"Fit Failure: {failure}")
+            log(ERROR, f"Fit Failure: {failure}")
 
         if not results:
             return None, {}
@@ -184,46 +184,36 @@ class FedMeta(flwr.server.strategy.FedAvg):
     #     # Return client/config pairs
     #     return [(client, evaluate_ins) for client in clients]
 
-    # def aggregate_evaluate(
-    #     self,
-    #     server_round: int,
-    #     results: List[Tuple[ClientProxy, EvaluateRes]],
-    #     failures: List[Union[Tuple[ClientProxy, EvaluateRes], BaseException]],
-    # ) -> Tuple[Optional[float], Dict[str, Scalar]]:
-    #     """Aggregate evaluation losses using weighted average."""
-    #     for failure in failures:
-    #         print(f"Evaluate Failure: {failure}")
-    #     if not results:
-    #         return None, {}
-    #     # Do not aggregate if there are failures and failures are not accepted
-    #     if not self.accept_failures and failures:
-    #         return None, {}
+    def aggregate_evaluate(
+        self,
+        server_round: int,
+        results: list[tuple[ClientProxy, EvaluateRes]],
+        failures: list[Union[tuple[ClientProxy, EvaluateRes], BaseException]],
+    ) -> tuple[Optional[float], dict[str, Scalar]]:
+        """Aggregate evaluation losses using weighted average."""
+        for failure in failures:
+            log(ERROR, f"Evaluate Failure: {failure}")
+        if not results:
+            return None, {}
+        # Do not aggregate if there are failures and failures are not accepted
+        if not self.accept_failures and failures:
+            return None, {}
 
-    #     # Aggregate loss
-    #     loss_aggregated = weighted_loss_avg(
-    #         [
-    #             (evaluate_res.num_examples, evaluate_res.loss)
-    #             for _, evaluate_res in results
-    #         ]
-    #     )
+        # Aggregate loss
+        loss_aggregated = weighted_loss_avg(
+            [
+                (evaluate_res.num_examples, evaluate_res.loss)
+                for _, evaluate_res in results
+            ]
+        )
 
-    #     smoothing_weight = 0.7
-    #     self.ema_loss = update_ema(self.ema_loss, loss_aggregated, smoothing_weight)
-    #     loss_aggregated = self.ema_loss
+        # Aggregate custom metrics if aggregation fn was provided
+        metrics_aggregated = {}
+        if self.evaluate_metrics_aggregation_fn:
+            eval_metrics = [(res.num_examples, res.metrics) for _, res in results]
+            metrics_aggregated = self.evaluate_metrics_aggregation_fn(eval_metrics)
 
-    #     # Aggregate custom metrics if aggregation fn was provided
-    #     metrics_aggregated = {}
-    #     if self.evaluate_metrics_aggregation_fn:
-    #         eval_metrics = [(res.num_examples, res.metrics) for _, res in results]
-    #         metrics_aggregated = self.evaluate_metrics_aggregation_fn(eval_metrics)
-    #         self.ema_acc = update_ema(
-    #             self.ema_acc,
-    #             round(float(metrics_aggregated["accuracy"] * 100), 3),
-    #             smoothing_weight,
-    #         )
-    #         metrics_aggregated["accuracy"] = self.ema_acc
-
-    #     return loss_aggregated, metrics_aggregated
+        return loss_aggregated, metrics_aggregated
 
 
 #########################
@@ -249,7 +239,7 @@ def generate_server_fn(context, eval_fn=None):
             initial_parameters=params,
             evaluate_metrics_aggregation_fn=weighted_average,
             fraction_fit=0.4,
-            fraction_evaluate=0.4,
+            fraction_evaluate=0.2,
             evaluate_fn=eval_fn,
             on_fit_config_fn=fit_config,
             on_evaluate_config_fn=fit_config,
@@ -274,7 +264,7 @@ def generate_client_fn(context, files, test_file):
         dataset = SmellRecurrenceDataset.RecurrenceDataset(
             train_file=file,
             test_file=test_file,
-            augment_multiplier=2,
+            augment_multiplier=0,
             use_crop=False,
             use_erase=False,
             use_jitter=False,
