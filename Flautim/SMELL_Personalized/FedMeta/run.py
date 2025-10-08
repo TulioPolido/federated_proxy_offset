@@ -30,7 +30,7 @@ import random
 
 DATASET = "PAMAP"
 NUM_CHANNELS = 6
-BATCH_SIZE = 16
+BATCH_SIZE = 32
 NUM_ROUNDS = 3
 NUM_EPOCHS = 1
 EMB_DIM = 64
@@ -244,7 +244,7 @@ def generate_server_fn(context, eval_fn=None):
             initial_parameters=params,
             evaluate_metrics_aggregation_fn=weighted_average,
             fraction_fit=0.4,
-            fraction_evaluate=0.2,
+            fraction_evaluate=0.4,
             evaluate_fn=eval_fn,
             on_fit_config_fn=fit_config,
             on_evaluate_config_fn=fit_config,
@@ -269,7 +269,7 @@ def generate_client_fn(context, files, test_file):
         dataset = SmellRecurrenceDataset.RecurrenceDataset(
             train_file=file,
             test_file=test_file,
-            augment_multiplier=0,
+            augment_multiplier=2,
             use_crop=False,
             use_erase=False,
             use_jitter=False,
