@@ -87,7 +87,7 @@ class RecurrenceExperiment(Experiment):
                 data = data.to(self.device)
                 labels = labels.to(self.device)
 
-                outputs = self.model(data)
+                outputs = model(data)
                 loss = self.criterion(outputs, labels)
 
                 loss_sum += loss.item()
@@ -109,29 +109,35 @@ class RecurrenceExperiment(Experiment):
         return loss
 
     def compute_query_loss(self, model, query_loader):
-        model.eval()  # just evaluation mode, but gradients are tracked
+        model.eval()
         qry_total_loss = []
         qry_num_sample = []
         loss_sum = 0.0
 
+        first_batch = True
         for data, labels in query_loader:
             data, labels = data.to(self.device), labels.to(self.device)
 
-            outputs = self.model(data)
+            outputs = model(data)
             loss = self.criterion(outputs, labels)
-            loss_sum += loss.item()
+
+            # === Accumulate loss as a tensor ===
+            if first_batch:
+                loss_sum = loss * labels.size(0)
+                first_batch = False
+            else:
+                loss_sum = loss_sum + loss * labels.size(0)
 
             qry_num_sample.append(labels.size(0))
-            qry_total_loss.append(loss.item())
+            qry_total_loss.append(loss.detach().item())
 
+        # Average loss per sample (still tensor)
         loss_sum = loss_sum / sum(qry_num_sample)
-        grads = torch.autograd.grad(loss_sum, list(model.parameters()))
 
-        for param in model.parameters():
-            if param.grad is not None:
-                param.grad.zero_()
+        # === Compute gradients wrt model parameters ===
+        grads = torch.autograd.grad(loss_sum, list(model.parameters()), create_graph=False)
 
-        grads = [grad_.cpu().numpy() for grad_ in grads]
+        grads = [g.detach().cpu().numpy() for g in grads if g is not None]
         return grads
 
     def fit(  # ignorar
@@ -201,12 +207,7 @@ class RecurrenceExperiment(Experiment):
         # ---- Inner loop adaptation ----
         self.adapted_model = copy.deepcopy(self.model).to(self.device)
         loss = self.train_model(
-            self.adapted_model, support_loader, alpha, self.epochs
-        )
-
-        # ---- Evaluate adapted model on query set ----
-        loss_avg, acc, prec, rec, f1, conf = self.test(
-            self.adapted_model, support_loader, query_loader
+            self.adapted_model, support_loader, alpha, 2
         )
 
         self.adapted_model.eval()

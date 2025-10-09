@@ -25,8 +25,8 @@ import random
 DATASET = "PAMAP"
 NUM_CHANNELS = 6
 BATCH_SIZE = 32
-NUM_ROUNDS = 35
-NUM_EPOCHS = 1
+NUM_ROUNDS = 100
+NUM_EPOCHS = 7
 EMB_DIM = 64
 
 def fedmeta_update_maml(
@@ -235,7 +235,7 @@ def generate_server_fn(context, eval_fn=None):
             initial_parameters=params,
             evaluate_metrics_aggregation_fn=weighted_average,
             fraction_fit=0.4,
-            fraction_evaluate=0.4,
+            fraction_evaluate=1.0,
             evaluate_fn=eval_fn,
             on_fit_config_fn=fit_config,
             on_evaluate_config_fn=fit_config,
@@ -265,7 +265,7 @@ def generate_client_fn(context, files, test_file):
             use_erase=False,
             use_jitter=False,
             use_rotation=True,
-            # num_workers=0,
+            num_workers=0,
         )
 
         return FedMetaRecurrenceExperiment.RecurrenceExperiment(
