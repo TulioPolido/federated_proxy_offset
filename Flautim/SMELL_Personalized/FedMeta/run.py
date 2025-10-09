@@ -31,7 +31,7 @@ import random
 DATASET = "PAMAP"
 NUM_CHANNELS = 6
 BATCH_SIZE = 32
-NUM_ROUNDS = 3
+NUM_ROUNDS = 35
 NUM_EPOCHS = 1
 EMB_DIM = 64
 
@@ -50,6 +50,16 @@ def update_ema(
     return (1 - smoothing_weight) * current_value + smoothing_weight * prev_ema
 
 
+def tensor_summary(name: str, tensor: torch.Tensor):
+    """Return a compact summary of a tensor for logging."""
+    if tensor is None:
+        return f"{name}: None"
+    return (f"{name}: shape={tuple(tensor.shape)}, "
+            f"mean={tensor.mean().item():.6f}, "
+            f"std={tensor.std().item():.6f}, "
+            f"min={tensor.min().item():.6f}, "
+            f"max={tensor.max().item():.6f}")
+
 def fedmeta_update_maml(
     net: torch.nn.Module,
     beta: float,
@@ -61,18 +71,20 @@ def fedmeta_update_maml(
     params_dict = zip(net.state_dict().keys(), weights_results)
     state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
     net.load_state_dict(state_dict, strict=True)
+    
     optimizer = torch.optim.Adam(
         list(net.parameters()), lr=beta, weight_decay=weight_decay
     )
-    log(INFO, f"Net params before: {net.parameters()}")
-    for params, grad_ins in zip(net.parameters(), gradients_aggregated):
-        params.grad = torch.tensor(grad_ins).to(params.dtype)
 
+    # ---- ASSIGN GRADS ----
+    for (name, param), grad_ins in zip(net.named_parameters(), gradients_aggregated):
+        param.grad = torch.tensor(grad_ins, dtype=param.dtype)
+
+    # ---- OPTIMIZER STEP ----
     optimizer.step()
     optimizer.zero_grad()
-    weights_prime = [val.cpu().numpy() for _, val in net.state_dict().items()]
-    log(INFO, f"Net params after: {net.parameters()}")
 
+    weights_prime = [val.cpu().numpy() for _, val in net.state_dict().items()]
     return weights_prime
 
 
@@ -134,16 +146,22 @@ class FedMeta(flwr.server.strategy.FedAvg):
             grads_file = fit_res.metrics.get("grads_file")
             if grads_file is None:
                 raise ValueError("No grads_file in metrics for a client!")
+            
             # Load the .npz file
             log(INFO, f"Reading file for: {grads_file}")
             file_path = f"gradients_{grads_file}.npz"
-            with np.load(file_path) as data:
-                grads = [data[key] for key in data]
+
+            try:
+                with np.load(file_path) as data:
+                    grads = [data[key] for key in data]
+            except FileNotFoundError:
+                log(ERROR, f"File not found: {file_path}")
+                raise
+
             grads_results.append((grads, fit_res.num_examples))
 
         # Aggregate gradients
         gradients_aggregated = aggregate(grads_results)
-        log(INFO, f"Grads: {gradients_aggregated}")
 
         weights_prime = fedmeta_update_maml(
             net=self.net,
@@ -153,6 +171,10 @@ class FedMeta(flwr.server.strategy.FedAvg):
             weight_decay=1e-4,
         )
         parameters_aggregated = ndarrays_to_parameters(weights_prime)
+
+        # log(INFO, "[FedMeta] Aggregated parameters summary:")
+        # for i, w in enumerate(weights_prime[:10]):  # print only first 10
+        #     log(INFO, f"  Param[{i}] shape={w.shape}, mean={np.mean(w):.6f}, std={np.std(w):.6f}")
 
         # Metrics
         metrics_aggregated = {}

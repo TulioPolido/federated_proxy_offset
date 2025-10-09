@@ -454,52 +454,78 @@ class RecurrenceExperiment(Experiment):
 
         grads = [grad_.cpu().numpy() for grad_ in grads]
         return grads
+    
+    def log_parameters(self, parameters, func_name):
+        self.log(
+            f"[{self.client_name}] - Received parameters in {func_name}():",
+            details="",
+            object="",
+            object_id=self.id
+        )
+        for i, w in enumerate(parameters[:10]):
+            self.log(
+                f"[{self.client_name}] - Param[{i}] shape={w.shape}, mean={np.mean(w):.6f}, std={np.std(w):.6f}",
+                details="",
+                object="",
+                object_id=self.id,
+            )
 
     def fit(  # ignorar
         self, parameters: NDArrays, config: Dict[str, Scalar]
     ) -> Tuple[NDArrays, int, Dict]:
-        # alpha = config["alpha"]
-        self.log(
-            f"{self.client_name} - FedMeta client training started",
-            details="",
-            object="",
-            object_id=self.id,
-        )
-        self.epoch_fl = config["server_round"]
+        try:
+            # self.log_parameters(parameters, "fit")
 
-        # === Load global model ===
-        self.model.set_parameters(parameters)
+            # alpha = config["alpha"]
+            self.log(
+                f"{self.client_name} - FedMeta client training started",
+                details="",
+                object="",
+                object_id=self.id,
+            )
+            self.epoch_fl = config["server_round"]
 
-        # === Use provided splits ===
-        support_loader, query_loader = self.dataset.dataloader(validation=False)
-        total_len = len(support_loader.dataset) + len(query_loader.dataset)
+            # === Load global model ===
+            self.model.set_parameters(parameters)
 
-        # === Inner loop: adapt model on support (train set) ===
-        self.adapted_model = copy.deepcopy(self.model).to(self.device)
+            # === Use provided splits ===
+            support_loader, query_loader = self.dataset.dataloader(validation=False)
+            total_len = len(support_loader.dataset) + len(query_loader.dataset)
 
-        loss = self.train_model_with_dynamic_lr(
-            self.adapted_model, support_loader, self.lr, self.epochs
-        )
+            # === Inner loop: adapt model on support (train set) ===
+            self.adapted_model = copy.deepcopy(self.model).to(self.device)
 
-        # === Outer loop: compute query loss on adapted model ===
-        grads = self.compute_query_loss(self.adapted_model, query_loader)  # ignorar
-        # Define your target file path
-        file_path = f"gradients_{self.client_name}.npz"
-        np.savez(file_path, *grads)
+            loss = self.train_model_with_dynamic_lr(
+                self.adapted_model, support_loader, self.lr, self.epochs
+            )
 
-        self.log(
-            f"{self.client_name} - FedMeta client finished",
-            details="",
-            object="",
-            object_id=self.id,
-        )
+            # === Outer loop: compute query loss on adapted model ===
+            grads = self.compute_query_loss(self.adapted_model, query_loader)  # ignorar
+            # Define your target file path
+            file_path = f"gradients_{self.client_name}.npz"
+            np.savez(file_path, *grads)
 
-        # grads is already a list of numpy arrays
-        return (
-            self.model.get_parameters(),
-            total_len,
-            {"loss": loss.item(), "grads_file": self.client_name},
-        )
+            self.log(
+                f"{self.client_name} - FedMeta client finished",
+                details="",
+                object="",
+                object_id=self.id,
+            )
+
+            # grads is already a list of numpy arrays
+            return (
+                self.model.get_parameters(),
+                total_len,
+                {"loss": loss.item(), "grads_file": self.client_name},
+            )
+        except Exception as e:
+            self.log(
+                f"{self.client_name} - ERROR in fit(): {e}",
+                details="",
+                object="experiment_fit",
+                object_id=self.id,
+            )
+            raise
 
     ################################
     # TESTING  FUNCTIONS ######
@@ -652,56 +678,67 @@ class RecurrenceExperiment(Experiment):
         # alpha = config["alpha"]
         return_dic = {}
 
-        self.log(
-            f"{self.client_name} - FedMeta Model evaluation started",
-            details="",
-            object="experiment_evaluate",
-            object_id=self.id,
-        )
+        # self.log_parameters(parameters, "evaluate")
 
-        self.model.set_parameters(parameters)
-
-        self.epoch_fl = config["server_round"]
-        self.log(
-            f"{self.client_name} - Val Loop",
-            details="",
-            object="experiment_evaluate",
-            object_id=self.id,
-        )
-        loss, values_metrics_validation = self.validation_loop(
-            self.dataset.dataloader(validation=True), self.lr
-        )
-        values_metrics_validation["LOSS"] = loss
-
-        self.log(
-            f"{self.client_name} - Mesure: "
-            + "metrics."
-            + str(values_metrics_validation),
-            details="",
-            object="",
-            object_id=self.id,
-        )
-
-        for name in values_metrics_validation:
-            # self.log(f"Mesure: "+ 'metrics.' + str(name) , details="", object="", object_id=self.id)
-            self.measures.log(
-                self,
-                name,
-                values_metrics_validation[name],
-                validation=True,
-                epoch=self.epoch_fl,
+        try:
+            self.log(
+                f"{self.client_name} - FedMeta Model evaluation started",
+                details="",
+                object="experiment_evaluate",
+                object_id=self.id,
             )
-            return_dic[name] = float(values_metrics_validation[name])
 
-        self.model.save()
-        self.log(
-            f"{self.client_name} - evaluation finished",
-            details="",
-            object="experiment_evaluate",
-            object_id=self.id,
-        )
-        return (
-            float(loss),
-            len(self.dataset.dataloader(validation=True)),
-            return_dic,
-        )
+            self.model.set_parameters(parameters)
+
+            self.epoch_fl = config["server_round"]
+            self.log(
+                f"{self.client_name} - Val Loop",
+                details="",
+                object="experiment_evaluate",
+                object_id=self.id,
+            )
+            loss, values_metrics_validation = self.validation_loop(
+                self.dataset.dataloader(validation=True), self.lr
+            )
+            values_metrics_validation["LOSS"] = loss
+
+            self.log(
+                f"{self.client_name} - Mesure: "
+                + "metrics."
+                + str(values_metrics_validation),
+                details="",
+                object="",
+                object_id=self.id,
+            )
+
+            for name in values_metrics_validation:
+                # self.log(f"Mesure: "+ 'metrics.' + str(name) , details="", object="", object_id=self.id)
+                self.measures.log(
+                    self,
+                    name,
+                    values_metrics_validation[name],
+                    validation=True,
+                    epoch=self.epoch_fl,
+                )
+                return_dic[name] = float(values_metrics_validation[name])
+
+            self.model.save()
+            self.log(
+                f"{self.client_name} - evaluation finished",
+                details="",
+                object="experiment_evaluate",
+                object_id=self.id,
+            )
+            return (
+                float(loss),
+                len(self.dataset.dataloader(validation=True)),
+                return_dic,
+            )
+        except Exception as e:
+            self.log(
+                f"{self.client_name} - ERROR in evaluate(): {e}",
+                details="",
+                object="experiment_evaluate",
+                object_id=self.id,
+            )
+            raise
