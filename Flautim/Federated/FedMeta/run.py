@@ -3,7 +3,7 @@ from typing import List, Optional, Tuple, Union
 from flautim.pytorch.common import run_federated, weighted_average
 import numpy as np
 import RecurrenceModel
-import FedRecurrenceDataset
+import FedMetaRecurrenceDataset
 import FedMetaRecurrenceExperiment
 import flwr
 import torch
@@ -22,9 +22,9 @@ from flwr.server.strategy.aggregate import aggregate, weighted_loss_avg
 import flautim as fl
 import random
 
-DATASET = "PAMAP"
+DATASET = "WISDM"
 NUM_CHANNELS = 6
-BATCH_SIZE = 32
+BATCH_SIZE = 1
 NUM_ROUNDS = 100
 NUM_EPOCHS = 7
 EMB_DIM = 64
@@ -235,8 +235,8 @@ def generate_server_fn(context, eval_fn=None):
             lr_outer=1e-4,
             initial_parameters=params,
             evaluate_metrics_aggregation_fn=weighted_average,
-            fraction_fit=0.4,
-            fraction_evaluate=1.0,
+            fraction_fit=FRACTION_FIT,
+            fraction_evaluate=FRACTION_EVALUATE,
             evaluate_fn=eval_fn,
             on_fit_config_fn=fit_config,
             on_evaluate_config_fn=fit_config,
@@ -248,7 +248,7 @@ def generate_server_fn(context, eval_fn=None):
     return create_server_fn
 
 
-def generate_client_fn(context, files):
+def generate_client_fn(context, files, test_file):
     def create_client_fn(context_flwr):
 
         cid = int(context_flwr.node_config["partition-id"])
@@ -258,15 +258,16 @@ def generate_client_fn(context, files):
             context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=cid
         )
 
-        dataset = FedRecurrenceDataset.RecurrenceDataset(
-            file=file,
-            augment_multiplier=2,
+        dataset = FedMetaRecurrenceDataset.RecurrenceDataset(
+            train_file=file,
+            test_file=test_file,
+            augment_multiplier=AUGMENTATION,
+            batch_size=BATCH_SIZE,
             use_crop=False,
             use_erase=False,
             use_jitter=False,
             use_rotation=True,
             num_workers=0,
-            test_percentage=0.2,
         )
 
         return FedMetaRecurrenceExperiment.RecurrenceExperiment(
@@ -303,7 +304,7 @@ if __name__ == "__main__":
         if DATASET == "PAMAP":
             # Number of training clients
             TOTAL_USERS = 8
-            NUM_CLIENTS = 8
+            NUM_CLIENTS = 7
             TEST_USERS = TOTAL_USERS - NUM_CLIENTS
             NUM_CLASSES = 7
             WINDOW_SIZE = 1024
@@ -313,11 +314,14 @@ if __name__ == "__main__":
             LEARNING_RATE_STEP = 3
             LEARNING_RATE_GAMMA = 0.5
             WEIGHT_DECAY = 6.7e-5
+            AUGMENTATION = 2
+            FRACTION_FIT = 0.4
+            FRACTION_EVALUATE = 1.0
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
             # Shuffle and split
-            test_files = []
+            test_files = [7]
             train_files = [i for i in all_files if i not in test_files]
             # test_files = random.sample(all_files, TEST_USERS)
             # train_files = [f for f in all_files if f not in test_files]
@@ -332,13 +336,13 @@ if __name__ == "__main__":
                 for i in train_files
             ]
 
-            # # Load and combine test files
-            # test_files = [
-            #     torch.load(
-            #         f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
-            #     )
-            #     for i in test_files
-            # ]
+            # Load and combine test files
+            test_files = [
+                torch.load(
+                    f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
+                )
+                for i in test_files
+            ]
 
         elif DATASET == "WISDM":
             # Number of training clients
@@ -353,11 +357,14 @@ if __name__ == "__main__":
             LEARNING_RATE_STEP = 3
             LEARNING_RATE_GAMMA = 0.5
             WEIGHT_DECAY = 1.1e-5
+            AUGMENTATION = 0
+            FRACTION_FIT = 0.08
+            FRACTION_EVALUATE = 0.1
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
             # Shuffle and split
-            test_files = [random.sample(all_files, TEST_USERS)]
+            test_files = random.sample(all_files, TEST_USERS)
             train_files = [f for f in all_files if f not in test_files]
             fl.log(f"Train users: {train_files}")
             fl.log(f"Test users: {test_files}")
@@ -370,21 +377,21 @@ if __name__ == "__main__":
                 for i in train_files
             ]
 
-            # # Load and combine test files
-            # test_files = [
-            #     torch.load(
-            #         f"./data/WISDM_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
-            #     )
-            #     for i in test_files
-            # ]
+            # Load and combine test files
+            test_files = [
+                torch.load(
+                    f"./data/WISDM_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
+                )
+                for i in test_files
+            ]
 
-        # combined_test_data = {
-        #     "data": torch.cat([f["data"] for f in test_files], dim=0),
-        #     "labels": torch.cat([f["labels"] for f in test_files], dim=0),
-        # }
+        combined_test_data = {
+            "data": torch.cat([f["data"] for f in test_files], dim=0),
+            "labels": torch.cat([f["labels"] for f in test_files], dim=0),
+        }
 
-        client_fn_callback = generate_client_fn(context, files)
-        # evaluate_fn_callback = evaluate_fn(context, combined_test_data)
+        client_fn_callback = generate_client_fn(context, files, combined_test_data)
+        evaluate_fn_callback = evaluate_fn(context, combined_test_data)
         server_fn_callback = generate_server_fn(context, eval_fn=None)
 
         fl.log("Starting Federated Experiment")
