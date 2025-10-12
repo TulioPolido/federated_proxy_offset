@@ -9,28 +9,27 @@ import random
 
 class RecurrenceDataset(Dataset):
     def __init__(
-            self,
-            file,
-            augment_multiplier=0,
-            use_crop=False,
-            use_erase=False,
-            use_jitter=False,
-            use_rotation=False,
-            test_percentage=0,
-            **kwargs):
+        self,
+        file,
+        augment_multiplier=0,
+        use_crop=False,
+        use_erase=False,
+        use_jitter=False,
+        use_rotation=False,
+        test_percentage=0,
+        **kwargs,
+    ):
         try:
-            super(RecurrenceDataset, self)\
-                .__init__(name="RecurrenceDataset", **kwargs)
+            super(RecurrenceDataset, self).__init__(name="RecurrenceDataset", **kwargs)
 
-            self.data = file['data'].float()\
-                .permute(0, 3, 1, 2)  # Shape: (N, C, H, W)
-            self.labels = file['labels'].long()
+            self.data = file["data"].float().permute(0, 3, 1, 2)  # Shape: (N, C, H, W)
+            self.labels = file["labels"].long()
 
             self.xdtype = torch.float32
             self.ydtype = torch.int64
-            self.batch_size = kwargs.get('batch_size', 32)
-            self.shuffle = kwargs.get('shuffle', True)
-            self.num_workers = kwargs.get('num_workers', 1)
+            self.batch_size = kwargs.get("batch_size", 32)
+            self.shuffle = kwargs.get("shuffle", True)
+            self.num_workers = kwargs.get("num_workers", 1)
             self.test_size = int(test_percentage * len(self.labels))
 
             # Augmentation options
@@ -111,8 +110,8 @@ class RecurrenceDataset(Dataset):
         try:
             train = copy.deepcopy(self)
             if self.test_size > 0:
-                train.data = self.data[:-self.test_size]
-                train.labels = self.labels[:-self.test_size]
+                train.data = self.data[: -self.test_size]
+                train.labels = self.labels[: -self.test_size]
             else:
                 train.data = self.data
                 train.labels = self.labels
@@ -120,20 +119,18 @@ class RecurrenceDataset(Dataset):
         except Exception as e:
             fl.log(f"Error in RecurrenceDataset train(): {e}")
 
-
     def validation(self):
         try:
             val = copy.deepcopy(self)
             if self.test_size > 0:
-                val.data = self.data[-self.test_size:]
-                val.labels = self.labels[-self.test_size:]
+                val.data = self.data[-self.test_size :]
+                val.labels = self.labels[-self.test_size :]
             else:
                 val.data = []
                 val.labels = []
             return val
         except Exception as e:
             fl.log(f"Error in RecurrenceDataset validation(): {e}")
-
 
     def __len__(self):
         try:

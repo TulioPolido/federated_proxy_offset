@@ -12,41 +12,42 @@ import flautim as fl
 
 class RecurrenceExperiment(Experiment):
     def __init__(
-            self,
-            model,
-            dataset,
-            context,
-            lr=0.001,
-            epochs=10,
-            weight_decay=1e-4,
-            lr_step=3,
-            lr_gamma=0.5,
-            **kwargs
-            ):
+        self,
+        model,
+        dataset,
+        context,
+        client_name=0,
+        lr=0.001,
+        epochs=10,
+        weight_decay=1e-4,
+        lr_step=3,
+        lr_gamma=0.5,
+        **kwargs,
+    ):
         try:
-            super(RecurrenceExperiment, self)\
-                .__init__(model, dataset, context, **kwargs)
-
+            super(RecurrenceExperiment, self).__init__(
+                model, dataset, context, **kwargs
+            )
+            self.client_name = client_name
             self.criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
             self.optimizer = torch.optim.Adam(
-                self.model.parameters(),
-                lr=lr,
-                weight_decay=weight_decay
-                )
+                self.model.parameters(), lr=lr, weight_decay=weight_decay
+            )
             self.scheduler = StepLR(self.optimizer, step_size=lr_step, gamma=lr_gamma)
             self.epochs = epochs
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             self.model.to(self.device)
         except Exception as e:
             fl.log(f"Error in RecurrenceExperiment __init__: {e}")
+            raise
 
-    def training_loop(self, data_loader):
+    def training_loop(self, train_loader):
         try:
             self.model.train()
             loss_sum = 0.0
             all_preds, all_labels = [], []
 
-            for data, labels in data_loader:
+            for data, labels in train_loader:
                 data = data.to(self.device)
                 labels = labels.to(self.device)
 
@@ -61,7 +62,7 @@ class RecurrenceExperiment(Experiment):
                 all_preds.extend(predicted.cpu().numpy())
                 all_labels.extend(labels.cpu().numpy())
 
-            loss_avg = loss_sum / len(data_loader)
+            loss_avg = loss_sum / len(train_loader)
             balanced_acc = balanced_accuracy_score(all_labels, all_preds)
             precision = precision_score(
                 all_labels, all_preds, average="weighted", zero_division=0
@@ -76,15 +77,16 @@ class RecurrenceExperiment(Experiment):
             }
         except Exception as e:
             fl.log(f"Error in training loop: {e}")
+            raise
 
-    def validation_loop(self, data_loader):
+    def validation_loop(self, test_loader):
         try:
             self.model.eval()
             loss_sum = 0.0
             all_preds, all_labels = [], []
 
             with torch.no_grad():
-                for X, y in data_loader:
+                for X, y in test_loader:
                     X = X.to(self.device)
                     y = y.to(self.device)
 
@@ -94,7 +96,7 @@ class RecurrenceExperiment(Experiment):
                     all_preds.extend(predicted.cpu().numpy())
                     all_labels.extend(y.cpu().numpy())
 
-            loss_avg = loss_sum / len(data_loader)
+            loss_avg = loss_sum / len(test_loader)
             balanced_acc = balanced_accuracy_score(all_labels, all_preds)
             precision = precision_score(
                 all_labels, all_preds, average="weighted", zero_division=0
@@ -110,3 +112,4 @@ class RecurrenceExperiment(Experiment):
             }
         except Exception as e:
             fl.log(f"Error in validation loop: {e}")
+            raise
