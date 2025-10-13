@@ -24,11 +24,10 @@ import random
 
 DATASET = "WISDM"
 NUM_CHANNELS = 6
-BATCH_SIZE = 1
+BATCH_SIZE = 32
 NUM_ROUNDS = 100
-NUM_EPOCHS = 7
+NUM_EPOCHS = 5
 EMB_DIM = 64
-
 
 def fedmeta_update_maml(
     net: torch.nn.Module,
@@ -37,11 +36,11 @@ def fedmeta_update_maml(
     gradients_aggregated: NDArrays,
     weight_decay: float,
 ) -> NDArrays:
-
+    
     params_dict = zip(net.state_dict().keys(), weights_results)
     state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
     net.load_state_dict(state_dict, strict=True)
-
+    
     optimizer = torch.optim.Adam(
         list(net.parameters()), lr=beta, weight_decay=weight_decay
     )
@@ -116,7 +115,7 @@ class FedMeta(flwr.server.strategy.FedAvg):
             grads_file = fit_res.metrics.get("grads_file")
             if grads_file is None:
                 raise ValueError("No grads_file in metrics for a client!")
-
+            
             # Load the .npz file
             log(INFO, f"Reading file for: {grads_file}")
             file_path = f"gradients_{grads_file}.npz"
@@ -235,8 +234,8 @@ def generate_server_fn(context, eval_fn=None):
             lr_outer=1e-4,
             initial_parameters=params,
             evaluate_metrics_aggregation_fn=weighted_average,
-            fraction_fit=FRACTION_FIT,
-            fraction_evaluate=FRACTION_EVALUATE,
+            fraction_fit=0.4,
+            fraction_evaluate=1.0,
             evaluate_fn=eval_fn,
             on_fit_config_fn=fit_config,
             on_evaluate_config_fn=fit_config,
@@ -261,8 +260,7 @@ def generate_client_fn(context, files, test_file):
         dataset = FedMetaRecurrenceDataset.RecurrenceDataset(
             train_file=file,
             test_file=test_file,
-            augment_multiplier=AUGMENTATION,
-            batch_size=BATCH_SIZE,
+            augment_multiplier=2,
             use_crop=False,
             use_erase=False,
             use_jitter=False,
@@ -314,9 +312,6 @@ if __name__ == "__main__":
             LEARNING_RATE_STEP = 3
             LEARNING_RATE_GAMMA = 0.5
             WEIGHT_DECAY = 6.7e-5
-            AUGMENTATION = 2
-            FRACTION_FIT = 0.4
-            FRACTION_EVALUATE = 1.0
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
@@ -357,9 +352,6 @@ if __name__ == "__main__":
             LEARNING_RATE_STEP = 3
             LEARNING_RATE_GAMMA = 0.5
             WEIGHT_DECAY = 1.1e-5
-            AUGMENTATION = 0
-            FRACTION_FIT = 0.08
-            FRACTION_EVALUATE = 0.1
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
@@ -394,6 +386,8 @@ if __name__ == "__main__":
         evaluate_fn_callback = evaluate_fn(context, combined_test_data)
         server_fn_callback = generate_server_fn(context, eval_fn=None)
 
+        clients_resources = {"num_cpus": 1, "num_gpus": 0.15}
+
         fl.log("Starting Federated Experiment")
         # Run federated learning
         run_federated(
@@ -401,6 +395,7 @@ if __name__ == "__main__":
             server_fn=server_fn_callback,
             num_clients=NUM_CLIENTS,
             num_rounds=NUM_ROUNDS,
+            clients_resources = clients_resources
         )
     except Exception as e:
         fl.log(f"Error in run.py: {e}")

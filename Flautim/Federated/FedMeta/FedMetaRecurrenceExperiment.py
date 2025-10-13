@@ -1,6 +1,7 @@
 from collections import OrderedDict
 from typing import Dict, Tuple
 import numpy as np
+import gc
 
 from flautim.pytorch.federated.Experiment import Experiment
 import torch
@@ -20,8 +21,10 @@ from sklearn.metrics import (
     balanced_accuracy_score,
     precision_score,
     f1_score,
-    # confusion_matrix,
 )
+
+from torch.cuda.amp import autocast
+
 
 class RecurrenceExperiment(Experiment):
     def __init__(
@@ -47,7 +50,6 @@ class RecurrenceExperiment(Experiment):
             weight_decay=weight_decay
         )
         
-        # self.pre_train = pre_train
         self.epochs = epochs
         self.num_classes = num_classes
         self.lr = lr
@@ -78,101 +80,113 @@ class RecurrenceExperiment(Experiment):
     ################################
 
     def train_model(self, model, train_loader, alpha, num_epochs=1):
+        """Train with minimal memory footprint."""
         for _ in range(num_epochs):
-            loss_sum = 0.0
-            sup_num_sample = []
-            sup_total_loss = []
+            total_loss, total_samples = 0.0, 0
 
             for data, labels in train_loader:
-                data = data.to(self.device)
-                labels = labels.to(self.device)
+                data, labels = data.to(self.device), labels.to(self.device)
 
+                # Mixed precision forward
+                with autocast(enabled=True):
+                    outputs = model(data)
+                    loss = self.criterion(outputs, labels)
+
+                total_loss += loss.item() * labels.size(0)
+                total_samples += labels.size(0)
+
+                grads = torch.autograd.grad(loss, list(model.parameters()), create_graph=False)
+
+                # Update parameters without tracking gradients
+                with torch.no_grad():
+                    for param, grad_ in zip(model.parameters(), grads):
+                        if grad_ is not None:
+                            param -= alpha * grad_
+
+                # Clear tensors to avoid graph accumulation
+                del grads, outputs, data, labels, loss
+                torch.cuda.empty_cache()
+
+            torch.cuda.synchronize()
+
+        return total_loss / total_samples
+
+
+    def compute_query_loss(self, model, query_loader):
+        """Compute gradients for query set with minimal GPU memory usage."""
+        model.eval()
+        grads_sum = [torch.zeros_like(p, device="cpu") for p in model.parameters()]
+        total_samples = 0
+
+        for data, labels in query_loader:
+            data, labels = data.to(self.device), labels.to(self.device)
+            batch_size = labels.size(0)
+            total_samples += batch_size
+
+            # Use mixed precision for memory efficiency
+            with torch.cuda.amp.autocast(enabled=True):
                 outputs = model(data)
                 loss = self.criterion(outputs, labels)
 
-                loss_sum += loss.item()
-                sup_num_sample.append(labels.size(0))
-                sup_total_loss.append(loss * labels.size(0))
+            # Compute per-batch grads, without graph
+            grads = torch.autograd.grad(loss, list(model.parameters()), create_graph=False)
 
-                grads = torch.autograd.grad(
-                    loss, list(model.parameters()), create_graph=False
-                )
+            # Accumulate grads safely on CPU
+            for i, g in enumerate(grads):
+                if g is not None:
+                    grads_sum[i] += g.detach().cpu() * batch_size
 
-                for param, grad_ in zip(model.parameters(), grads):
-                    param.data = param.data - alpha * grad_
+            del outputs, loss, grads, data, labels
+            torch.cuda.empty_cache()
 
-                for param in model.parameters():
-                    if param.grad is not None:
-                        param.grad.zero_()
+        # Average grads across all samples
+        avg_grads = [g / total_samples for g in grads_sum]
 
-        loss = sum(sup_total_loss) / sum(sup_num_sample)
-        return loss
+        # Convert to numpy for Flower
+        grads_np = [g.numpy() for g in avg_grads]
 
-    def compute_query_loss(self, model, query_loader):
-        model.eval()
-        qry_total_loss = []
-        qry_num_sample = []
-        loss_sum = 0.0
+        del grads_sum, avg_grads
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
 
-        first_batch = True
-        for data, labels in query_loader:
-            data, labels = data.to(self.device), labels.to(self.device)
+        return grads_np
 
-            outputs = model(data)
-            loss = self.criterion(outputs, labels)
 
-            # === Accumulate loss as a tensor ===
-            if first_batch:
-                loss_sum = loss * labels.size(0)
-                first_batch = False
-            else:
-                loss_sum = loss_sum + loss * labels.size(0)
+    def fit(self, parameters: NDArrays, config: Dict[str, Scalar]) -> Tuple[NDArrays, int, Dict]:
+        
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
 
-            qry_num_sample.append(labels.size(0))
-            qry_total_loss.append(loss.detach().item())
-
-        # Average loss per sample (still tensor)
-        loss_sum = loss_sum / sum(qry_num_sample)
-
-        # === Compute gradients wrt model parameters ===
-        grads = torch.autograd.grad(loss_sum, list(model.parameters()), create_graph=False)
-
-        grads = [g.detach().cpu().numpy() for g in grads if g is not None]
-        return grads
-
-    def fit(  # ignorar
-        self, parameters: NDArrays, config: Dict[str, Scalar]
-    ) -> Tuple[NDArrays, int, Dict]:
-        try:
-            # alpha = config["alpha"]
-            self.log(
-                f"{self.client_name} - FedMeta client training started",
-                details="",
-                object="",
-                object_id=self.id,
-            )
+            self.log(f"{self.client_name} - FedMeta client training started", details="", object="", object_id=self.id)
             self.epoch_fl = config["server_round"]
 
             # === Load global model ===
             self.model.set_parameters(parameters)
 
-            # === Use provided splits ===
+            # === Clear any old adapted model ===
+            if hasattr(self, "adapted_model"):
+                del self.adapted_model
+                torch.cuda.empty_cache()
+                gc.collect()
+
+            # === Reload dataloaders ===
             support_loader, query_loader = self.dataset.dataloader(validation=False)
             total_len = len(support_loader.dataset) + len(query_loader.dataset)
 
-            # === Inner loop: adapt model on support (train set) ===
+            # === Create fresh model for adaptation ===
             self.adapted_model = copy.deepcopy(self.model).to(self.device)
 
-            loss = self.train_model(
-                self.adapted_model, support_loader, self.lr, self.epochs
-            )
+            loss = self.train_model(self.adapted_model, support_loader, self.lr, self.epochs)
 
-            # === Outer loop: compute query loss on adapted model ===
-            grads = self.compute_query_loss(self.adapted_model, query_loader)  # ignorar
-            
-            # Define your target file path
+            grads = self.compute_query_loss(self.adapted_model, query_loader)
+
             file_path = f"gradients_{self.client_name}.npz"
             np.savez(file_path, *grads)
+
+            # Free adapted model after training
+            del self.adapted_model, grads
+            torch.cuda.empty_cache()
+            gc.collect()
 
             self.log(
                 f"{self.client_name} - FedMeta client finished",
@@ -181,25 +195,16 @@ class RecurrenceExperiment(Experiment):
                 object_id=self.id,
             )
 
-            # grads is already a list of numpy arrays
             return (
                 self.model.get_parameters(),
                 total_len,
-                {"loss": loss.item(), "grads_file": self.client_name},
+                {"loss": loss, "grads_file": self.client_name},
             )
-        except Exception as e:
-            self.log(
-                f"{self.client_name} - ERROR in fit(): {e}",
-                details="",
-                object="experiment_fit",
-                object_id=self.id,
-            )
-            raise
+
 
     ################################
-    # TESTING  FUNCTIONS ######
+    # TESTING FUNCTIONS ######
     ################################
-
 
     def validation_loop(self, data_loaders, alpha):
         support_loader, query_loader = data_loaders
@@ -211,7 +216,7 @@ class RecurrenceExperiment(Experiment):
         )
 
         self.adapted_model.eval()
-        loss_sum = 0.0
+        total_loss = 0.0
         all_preds, all_labels = [], []
 
         with torch.no_grad():
@@ -220,32 +225,32 @@ class RecurrenceExperiment(Experiment):
                 y = y.to(self.device)
 
                 outputs = self.adapted_model(X)
-                loss_sum += self.criterion(outputs, y).item()
+                total_loss += self.criterion(outputs, y).item()
                 _, predicted = torch.max(outputs.detach(), 1)
                 all_preds.extend(predicted.cpu().numpy())
                 all_labels.extend(y.cpu().numpy())
 
-        loss_avg = loss_sum / len(query_loader)
+                del outputs, X, y
+                torch.cuda.empty_cache()
+
+        loss_avg = total_loss / len(query_loader)
         balanced_acc = balanced_accuracy_score(all_labels, all_preds)
         precision = precision_score(
             all_labels, all_preds, average="weighted", zero_division=0
         )
         f1 = f1_score(all_labels, all_preds, average="weighted")
 
+        torch.cuda.empty_cache()
         return loss_avg, {
             "TEST_ACC": balanced_acc,
             "TEST_PREC": precision,
             "TEST_F1": f1,
         }
 
-    def evaluate(  # ignorar
+    def evaluate(
         self, parameters: NDArrays, config: Dict[str, Scalar]
     ) -> Tuple[float, int, Dict]:
-        # alpha = config["alpha"]
         return_dic = {}
-
-        # self.log_parameters(parameters, "evaluate")
-
         try:
             self.log(
                 f"{self.client_name} - FedMeta Model evaluation started",
@@ -255,30 +260,14 @@ class RecurrenceExperiment(Experiment):
             )
 
             self.model.set_parameters(parameters)
-
             self.epoch_fl = config["server_round"]
-            self.log(
-                f"{self.client_name} - Val Loop",
-                details="",
-                object="experiment_evaluate",
-                object_id=self.id,
-            )
+
             loss, values_metrics_validation = self.validation_loop(
                 self.dataset.dataloader(validation=True), self.lr
             )
             values_metrics_validation["LOSS"] = loss
 
-            self.log(
-                f"{self.client_name} - Mesure: "
-                + "metrics."
-                + str(values_metrics_validation),
-                details="",
-                object="",
-                object_id=self.id,
-            )
-
             for name in values_metrics_validation:
-                # self.log(f"Mesure: "+ 'metrics.' + str(name) , details="", object="", object_id=self.id)
                 self.measures.log(
                     self,
                     name,
@@ -295,6 +284,8 @@ class RecurrenceExperiment(Experiment):
                 object="experiment_evaluate",
                 object_id=self.id,
             )
+
+            torch.cuda.empty_cache()
             return (
                 float(loss),
                 len(self.dataset.dataloader(validation=True)),
