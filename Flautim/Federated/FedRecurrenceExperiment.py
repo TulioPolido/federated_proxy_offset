@@ -41,75 +41,77 @@ class RecurrenceExperiment(Experiment):
             fl.log(f"Error in RecurrenceExperiment __init__: {e}")
             raise
 
-    def training_loop(self, train_loader):
-        try:
-            self.model.train()
-            loss_sum = 0.0
-            all_preds, all_labels = [], []
+    def training_loop(self, dataloaders):
+        train_loader, _ = dataloaders
+        self.model.train()
+        loss_sum = 0.0
+        all_preds, all_labels = [], []
 
-            for data, labels in train_loader:
-                data = data.to(self.device)
-                labels = labels.to(self.device)
+        for data, labels in train_loader:
+            data = data.to(self.device)
+            labels = labels.to(self.device)
 
-                self.optimizer.zero_grad()
-                outputs = self.model(data)
-                loss = self.criterion(outputs, labels)
-                loss.backward()
-                self.optimizer.step()
+            self.optimizer.zero_grad()
+            outputs = self.model(data)
+            loss = self.criterion(outputs, labels)
+            loss.backward()
+            self.optimizer.step()
 
-                loss_sum += loss.item()
+            loss_sum += loss.item()
+            _, predicted = torch.max(outputs.detach(), 1)
+            all_preds.extend(predicted.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
+
+            del data, labels, outputs
+            torch.cuda.empty_cache()
+
+        loss_avg = loss_sum / len(train_loader)
+        balanced_acc = balanced_accuracy_score(all_labels, all_preds)
+        precision = precision_score(
+            all_labels, all_preds, average="weighted", zero_division=0
+        )
+        f1 = f1_score(all_labels, all_preds, average="weighted")
+        self.scheduler.step()
+
+        torch.cuda.synchronize()
+        return loss_avg, {
+            "TRAIN_ACC": balanced_acc,
+            "TRAIN_PREC": precision,
+            "TRAIN_F1": f1,
+        }
+
+    def validation_loop(self, dataloaders):
+        _, test_loader = dataloaders
+        self.model.eval()
+        loss_sum = 0.0
+        all_preds, all_labels = [], []
+
+        with torch.no_grad():
+            for X, y in test_loader:
+                X = X.to(self.device)
+                y = y.to(self.device)
+
+                outputs = self.model(X)
+                loss_sum += self.criterion(outputs, y).item()
                 _, predicted = torch.max(outputs.detach(), 1)
                 all_preds.extend(predicted.cpu().numpy())
-                all_labels.extend(labels.cpu().numpy())
+                all_labels.extend(y.cpu().numpy())
 
-            loss_avg = loss_sum / len(train_loader)
-            balanced_acc = balanced_accuracy_score(all_labels, all_preds)
-            precision = precision_score(
-                all_labels, all_preds, average="weighted", zero_division=0
-            )
-            f1 = f1_score(all_labels, all_preds, average="weighted")
+                del X, y, outputs
+                torch.cuda.empty_cache()
 
-            self.scheduler.step()
-            return loss_avg, {
-                "TRAIN_ACC": balanced_acc,
-                "TRAIN_PREC": precision,
-                "TRAIN_F1": f1,
-            }
-        except Exception as e:
-            fl.log(f"Error in training loop: {e}")
-            raise
-
-    def validation_loop(self, test_loader):
-        try:
-            self.model.eval()
-            loss_sum = 0.0
-            all_preds, all_labels = [], []
-
-            with torch.no_grad():
-                for X, y in test_loader:
-                    X = X.to(self.device)
-                    y = y.to(self.device)
-
-                    outputs = self.model(X)
-                    loss_sum += self.criterion(outputs, y).item()
-                    _, predicted = torch.max(outputs.detach(), 1)
-                    all_preds.extend(predicted.cpu().numpy())
-                    all_labels.extend(y.cpu().numpy())
-
-            loss_avg = loss_sum / len(test_loader)
-            balanced_acc = balanced_accuracy_score(all_labels, all_preds)
-            precision = precision_score(
-                all_labels, all_preds, average="weighted", zero_division=0
-            )
-            f1 = f1_score(all_labels, all_preds, average="weighted")
-            # conf_matrix = confusion_matrix(all_labels, all_preds, normalize="true")
-
-            return loss_avg, {
-                "TEST_ACC": balanced_acc,
-                "TEST_PREC": precision,
-                "TEST_F1": f1,
-                # "TEST_CONF": str(conf_matrix),
-            }
-        except Exception as e:
-            fl.log(f"Error in validation loop: {e}")
-            raise
+        loss_avg = loss_sum / len(test_loader)
+        balanced_acc = balanced_accuracy_score(all_labels, all_preds)
+        precision = precision_score(
+            all_labels, all_preds, average="weighted", zero_division=0
+        )
+        f1 = f1_score(all_labels, all_preds, average="weighted")
+        # conf_matrix = confusion_matrix(all_labels, all_preds, normalize="true")
+        
+        torch.cuda.synchronize()
+        return loss_avg, {
+            "TEST_ACC": balanced_acc,
+            "TEST_PREC": precision,
+            "TEST_F1": f1,
+            # "TEST_CONF": str(conf_matrix),
+        }

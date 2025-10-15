@@ -27,7 +27,6 @@ NUM_CHANNELS = 6
 BATCH_SIZE = 32
 NUM_ROUNDS = 100
 NUM_EPOCHS = 5
-EMB_DIM = 64
 
 def fedmeta_update_maml(
     net: torch.nn.Module,
@@ -234,8 +233,8 @@ def generate_server_fn(context, eval_fn=None):
             lr_outer=1e-4,
             initial_parameters=params,
             evaluate_metrics_aggregation_fn=weighted_average,
-            fraction_fit=0.4,
-            fraction_evaluate=1.0,
+            fraction_fit=FRACTION_FIT,
+            fraction_evaluate=FRACTION_EVALUATE,
             evaluate_fn=eval_fn,
             on_fit_config_fn=fit_config,
             on_evaluate_config_fn=fit_config,
@@ -260,7 +259,7 @@ def generate_client_fn(context, files, test_file):
         dataset = FedMetaRecurrenceDataset.RecurrenceDataset(
             train_file=file,
             test_file=test_file,
-            augment_multiplier=2,
+            augment_multiplier=AUGMENTATION,
             use_crop=False,
             use_erase=False,
             use_jitter=False,
@@ -312,6 +311,9 @@ if __name__ == "__main__":
             LEARNING_RATE_STEP = 3
             LEARNING_RATE_GAMMA = 0.5
             WEIGHT_DECAY = 6.7e-5
+            FRACTION_FIT = 0.5
+            FRACTION_EVALUATE = 1.0
+            AUGMENTATION = 2
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
@@ -352,6 +354,9 @@ if __name__ == "__main__":
             LEARNING_RATE_STEP = 3
             LEARNING_RATE_GAMMA = 0.5
             WEIGHT_DECAY = 1.1e-5
+            FRACTION_FIT = 0.1
+            FRACTION_EVALUATE = 0.4
+            AUGMENTATION = 0
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 

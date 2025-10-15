@@ -4,7 +4,7 @@ from flautim.pytorch.common import run_federated, weighted_average
 import numpy as np
 import SmellRecurrenceModel
 import SmellRecurrenceDataset
-import SmellRecurrenceExperiment
+import FedMetaSmellRecurrenceExperiment
 import flwr
 import torch
 from logging import INFO, ERROR
@@ -31,8 +31,8 @@ import random
 DATASET = "PAMAP"
 NUM_CHANNELS = 6
 BATCH_SIZE = 32
-NUM_ROUNDS = 35
-NUM_EPOCHS = 1
+NUM_ROUNDS = 100
+NUM_EPOCHS = 5
 EMB_DIM = 64
 
 ######################################
@@ -265,8 +265,8 @@ def generate_server_fn(context, eval_fn=None):
             lr_outer=1e-4,
             initial_parameters=params,
             evaluate_metrics_aggregation_fn=weighted_average,
-            fraction_fit=0.4,
-            fraction_evaluate=0.4,
+            fraction_fit=FRACTION_FIT,
+            fraction_evaluate=FRACTION_EVALUATE,
             evaluate_fn=eval_fn,
             on_fit_config_fn=fit_config,
             on_evaluate_config_fn=fit_config,
@@ -291,7 +291,7 @@ def generate_client_fn(context, files, test_file):
         dataset = SmellRecurrenceDataset.RecurrenceDataset(
             train_file=file,
             test_file=test_file,
-            augment_multiplier=2,
+            augment_multiplier=AUGMENTATION,
             use_crop=False,
             use_erase=False,
             use_jitter=False,
@@ -299,7 +299,7 @@ def generate_client_fn(context, files, test_file):
             num_workers=0,
         )
 
-        return SmellRecurrenceExperiment.RecurrenceExperiment(
+        return FedMetaSmellRecurrenceExperiment.RecurrenceExperiment(
             model,
             dataset,
             context,
@@ -345,6 +345,9 @@ if __name__ == "__main__":
             LEARNING_RATE_STEP = 3
             LEARNING_RATE_GAMMA = 0.5
             WEIGHT_DECAY = 6.7e-5
+            FRACTION_FIT = 0.5
+            FRACTION_EVALUATE = 1.0
+            AUGMENTATION = 2
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
@@ -385,11 +388,14 @@ if __name__ == "__main__":
             LEARNING_RATE_STEP = 3
             LEARNING_RATE_GAMMA = 0.5
             WEIGHT_DECAY = 1.1e-5
+            FRACTION_FIT = 0.1
+            FRACTION_EVALUATE = 0.4
+            AUGMENTATION = 0
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
             # Shuffle and split
-            test_files = [random.sample(all_files, TEST_USERS)]
+            test_files = random.sample(all_files, TEST_USERS)
             train_files = [f for f in all_files if f not in test_files]
             fl.log(f"Train users: {train_files}")
             fl.log(f"Test users: {test_files}")
