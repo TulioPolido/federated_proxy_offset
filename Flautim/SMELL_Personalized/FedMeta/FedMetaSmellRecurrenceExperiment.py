@@ -382,9 +382,19 @@ class RecurrenceExperiment(Experiment):
 
         return X1, X2, labels
 
-    def train_model(self, model, train_loader, alpha, num_epochs=1):
-        for _ in range(num_epochs):
+    def train_model(self, model, train_loader, alpha, num_epochs=1, log=False):
+        if log:
+            self.log(
+                f"{self.client_name} - Evaluate(): Trainning adapted model started",
+                object_id=self.id,
+            )
+        for i in range(num_epochs):
             total_loss, total_samples = 0.0, 0
+            if log:
+                self.log(
+                    f"{self.client_name} - Evaluate(): Epoch - {i} Started",
+                    object_id=self.id,
+                )
 
             for batch_data, batch_labels in train_loader:
                 pairs1, pairs2, labels = self.generate_pairs(
@@ -399,12 +409,16 @@ class RecurrenceExperiment(Experiment):
                 with autocast(enabled=True):
                     embeddings_x1 = model(pairs1.float())
                     embeddings_x2 = model(pairs2.float())
-                    loss = self.criterion(embeddings_x1, embeddings_x2, labels.to(self.device))
+                    loss = self.criterion(
+                        embeddings_x1, embeddings_x2, labels.to(self.device)
+                    )
 
                 total_loss += loss.item() * labels.size(0)
                 total_samples += labels.size(0)
 
-                grads = torch.autograd.grad(loss, list(model.parameters()), create_graph=False)
+                grads = torch.autograd.grad(
+                    loss, list(model.parameters()), create_graph=False
+                )
 
                 # Update parameters without tracking gradients
                 with torch.no_grad():
@@ -413,10 +427,30 @@ class RecurrenceExperiment(Experiment):
                             param -= alpha * grad_
 
                 # Clear tensors to avoid graph accumulation
-                del grads, embeddings_x1, embeddings_x2, pairs1, pairs2, labels, loss, batch_data, batch_labels
+                del (
+                    grads,
+                    embeddings_x1,
+                    embeddings_x2,
+                    pairs1,
+                    pairs2,
+                    labels,
+                    loss,
+                    batch_data,
+                    batch_labels,
+                )
                 torch.cuda.empty_cache()
+            if log:
+                self.log(
+                    f"{self.client_name} - Evaluate(): Epoch - {i} Finished",
+                    object_id=self.id,
+                )
 
             torch.cuda.synchronize()
+        if log:
+            self.log(
+                f"{self.client_name} - Evaluate(): Training adapted model finished",
+                object_id=self.id,
+            )
 
         return total_loss / total_samples
 
@@ -426,7 +460,9 @@ class RecurrenceExperiment(Experiment):
         total_samples = 0
 
         for batch_data, batch_labels in query_loader:
-            batch_data, batch_labels = batch_data.to(self.device), batch_labels.to(self.device)
+            batch_data, batch_labels = batch_data.to(self.device), batch_labels.to(
+                self.device
+            )
             batch_size = batch_labels.size(0)
             total_samples += batch_size
 
@@ -439,7 +475,7 @@ class RecurrenceExperiment(Experiment):
                 pairs_2.to(self.device),
                 labels.to(self.device),
             )
-            
+
             with autocast(enabled=True):
                 # Forward pass
                 embeddings_x1 = model(pairs_1)
@@ -447,18 +483,29 @@ class RecurrenceExperiment(Experiment):
 
                 # Compute loss
                 loss = self.criterion(embeddings_x1, embeddings_x2, labels)
-            
+
             # Compute per-batch grads, without graph
-            grads = torch.autograd.grad(loss, list(model.parameters()), create_graph=False)
-            
+            grads = torch.autograd.grad(
+                loss, list(model.parameters()), create_graph=False
+            )
+
             # Accumulate grads safely on CPU
             for i, g in enumerate(grads):
                 if g is not None:
                     grads_sum[i] += g.detach().cpu() * batch_size
 
-            del embeddings_x1, embeddings_x2, loss, grads, pairs_1, pairs_2, labels, batch_data, batch_labels
+            del (
+                embeddings_x1,
+                embeddings_x2,
+                loss,
+                grads,
+                pairs_1,
+                pairs_2,
+                labels,
+                batch_data,
+                batch_labels,
+            )
             torch.cuda.empty_cache()
-
 
         # Average grads across all samples
         avg_grads = [g / total_samples for g in grads_sum]
@@ -472,64 +519,74 @@ class RecurrenceExperiment(Experiment):
 
         return grads_np
 
-    def fit(self, parameters: NDArrays, config: Dict[str, Scalar]) -> Tuple[NDArrays, int, Dict]:
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize()
+    def fit(
+        self, parameters: NDArrays, config: Dict[str, Scalar]
+    ) -> Tuple[NDArrays, int, Dict]:
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
 
-            # alpha = config["alpha"]
-            self.log(f"{self.client_name} - Fit(): FedMeta client training started", object_id=self.id)
-            self.epoch_fl = config["server_round"]
+        # alpha = config["alpha"]
+        self.log(
+            f"{self.client_name} - Fit(): FedMeta client training started",
+            object_id=self.id,
+        )
+        self.epoch_fl = config["server_round"]
 
-            self.log(f"{self.client_name} - Fit(): Loading global model", object_id=self.id)
-            # === Load global model ===
-            self.model.set_parameters(parameters)
-            self.log(f"{self.client_name} - Fit(): Global model loaded", object_id=self.id)
+        # self.log(f"{self.client_name} - Fit(): Loading global model", object_id=self.id)
+        # === Load global model ===
+        self.model.set_parameters(parameters)
+        # self.log(f"{self.client_name} - Fit(): Global model loaded", object_id=self.id)
 
-            # === Clear any old adapted model ===
-            if hasattr(self, "adapted_model"):
-                del self.adapted_model
-                torch.cuda.empty_cache()
-                gc.collect()
-
-            self.log(f"{self.client_name} - Fit(): Loading dataset", object_id=self.id)
-            # === Use provided splits ===
-            support_loader, query_loader = self.dataset.dataloader(validation=False)
-            total_len = len(support_loader.dataset) + len(query_loader.dataset)
-            self.log(f"{self.client_name} - Fit(): Dataset loaded", object_id=self.id)
-
-            self.log(f"{self.client_name} - Fit(): Creating adapted model", object_id=self.id)
-            # === Inner loop: adapt model on support (train set) ===
-            self.adapted_model = copy.deepcopy(self.model).to(self.device)
-            self.log(f"{self.client_name} - Fit(): Adapted model created", object_id=self.id)
-
-            self.log(f"{self.client_name} - Fit(): Adapted model training started", object_id=self.id)
-            loss = self.train_model(self.adapted_model, support_loader, self.lr, self.epochs)
-            self.log(f"{self.client_name} - Fit(): Adapted model training finished", object_id=self.id)
-
-            # === Outer loop: compute query loss on adapted model ===
-            self.log(f"{self.client_name} - Fit(): Adapted model gradient calculation started", object_id=self.id)
-            grads = self.compute_query_loss(self.adapted_model, query_loader) 
-            self.log(f"{self.client_name} - Fit(): Adapted model gradient calculation finished", object_id=self.id)
-            
-            # Define your target file path
-            file_path = f"gradients_{self.client_name}.npz"
-            np.savez(file_path, *grads)
-            self.log(f"{self.client_name} - Fit(): Gradients saved", object_id=self.id)
-
-            # Free adapted model after training
-            del self.adapted_model, grads
+        # === Clear any old adapted model ===
+        if hasattr(self, "adapted_model"):
+            del self.adapted_model
             torch.cuda.empty_cache()
             gc.collect()
 
-            self.log(f"{self.client_name} - Fit(): Adapted model deleted", object_id=self.id)
-            self.log(f"{self.client_name} - Fit() FedMeta client training finished",object_id=self.id)
+        # self.log(f"{self.client_name} - Fit(): Loading dataset", object_id=self.id)
+        # === Use provided splits ===
+        support_loader, query_loader = self.dataset.dataloader(validation=False)
+        total_len = len(support_loader.dataset) + len(query_loader.dataset)
+        # self.log(f"{self.client_name} - Fit(): Dataset loaded", object_id=self.id)
 
-            # grads is already a list of numpy arrays
-            return (
-                self.model.get_parameters(),
-                total_len,
-                {"loss": loss, "grads_file": self.client_name},
-            )
+        # self.log(f"{self.client_name} - Fit(): Creating adapted model", object_id=self.id)
+        # === Inner loop: adapt model on support (train set) ===
+        self.adapted_model = copy.deepcopy(self.model).to(self.device)
+        # self.log(f"{self.client_name} - Fit(): Adapted model created", object_id=self.id)
+
+        # self.log(f"{self.client_name} - Fit(): Adapted model training started", object_id=self.id)
+        loss = self.train_model(
+            self.adapted_model, support_loader, self.lr, self.epochs
+        )
+        # self.log(f"{self.client_name} - Fit(): Adapted model training finished", object_id=self.id)
+
+        # === Outer loop: compute query loss on adapted model ===
+        # self.log(f"{self.client_name} - Fit(): Adapted model gradient calculation started", object_id=self.id)
+        grads = self.compute_query_loss(self.adapted_model, query_loader)
+        # self.log(f"{self.client_name} - Fit(): Adapted model gradient calculation finished", object_id=self.id)
+
+        # Define your target file path
+        file_path = f"gradients_{self.client_name}.npz"
+        np.savez(file_path, *grads)
+        # self.log(f"{self.client_name} - Fit(): Gradients saved", object_id=self.id)
+
+        # Free adapted model after training
+        del self.adapted_model, grads
+        torch.cuda.empty_cache()
+        gc.collect()
+
+        # self.log(f"{self.client_name} - Fit(): Adapted model deleted", object_id=self.id)
+        self.log(
+            f"{self.client_name} - Fit() FedMeta client training finished",
+            object_id=self.id,
+        )
+
+        # grads is already a list of numpy arrays
+        return (
+            self.model.get_parameters(),
+            total_len,
+            {"loss": loss, "grads_file": self.client_name},
+        )
 
     ################################
     # TESTING  FUNCTIONS ######
@@ -603,7 +660,16 @@ class RecurrenceExperiment(Experiment):
                 running_loss += loss
                 total_batches += 1
 
-                del embeddings_x1, embeddings_x2, batch_data, batch_labels, embeddings, pairs_1, pairs_2, labels
+                del (
+                    embeddings_x1,
+                    embeddings_x2,
+                    batch_data,
+                    batch_labels,
+                    embeddings,
+                    pairs_1,
+                    pairs_2,
+                    labels,
+                )
                 torch.cuda.empty_cache()
 
         # Average loss over all batches
@@ -663,23 +729,33 @@ class RecurrenceExperiment(Experiment):
 
     def validation_loop(self, data_loaders, alpha):
         support_loader, query_loader = data_loaders
-        self.log(f"{self.client_name} - Evaluate(): Datasets loaded", object="experiment_evaluate", object_id=self.id)
+        # self.log(f"{self.client_name} - Evaluate(): Datasets loaded", object="experiment_evaluate", object_id=self.id)
 
         # ---- Inner loop adaptation ----
-        self.log(f"{self.client_name} - Evaluate(): Adapted model traning started", object="experiment_evaluate", object_id=self.id)
+        # self.log(f"{self.client_name} - Evaluate(): Adapted model traning started", object="experiment_evaluate", object_id=self.id)
+        self.log(
+            f"{self.client_name} - Evaluate(): Adapted model copying",
+            object="experiment_evaluate",
+            object_id=self.id,
+        )
 
         self.adapted_model = copy.deepcopy(self.model).to(self.device)
-        loss = self.train_model(self.adapted_model, support_loader, alpha, 2)
-        self.log(f"{self.client_name} - Evaluate(): Adapted model training finished", object="experiment_evaluate", object_id=self.id)
+        self.log(
+            f"{self.client_name} - Evaluate(): Adapted model copied",
+            object="experiment_evaluate",
+            object_id=self.id,
+        )
 
+        loss = self.train_model(self.adapted_model, support_loader, alpha, 2, log=True)
+        # self.log(f"{self.client_name} - Evaluate(): Adapted model training finished", object="experiment_evaluate", object_id=self.id)
 
         # ---- Evaluate adapted model on query set ----
-        self.log(f"{self.client_name} - Evaluate(): Adapted model test started", object="experiment_evaluate", object_id=self.id)
+        # self.log(f"{self.client_name} - Evaluate(): Adapted model test started", object="experiment_evaluate", object_id=self.id)
 
         loss_avg, acc, prec, rec, f1, conf = self.test(
             self.adapted_model, support_loader, query_loader
         )
-        self.log(f"{self.client_name} - Evaluate(): Adapted model test finished", object="experiment_evaluate", object_id=self.id)
+        # self.log(f"{self.client_name} - Evaluate(): Adapted model test finished", object="experiment_evaluate", object_id=self.id)
 
         torch.cuda.empty_cache()
         return loss_avg, {
@@ -689,20 +765,24 @@ class RecurrenceExperiment(Experiment):
             "TEST_F1": f1,
         }
 
-    def evaluate(self, parameters: NDArrays, config: Dict[str, Scalar]) -> Tuple[float, int, Dict]:
+    def evaluate(
+        self, parameters: NDArrays, config: Dict[str, Scalar]
+    ) -> Tuple[float, int, Dict]:
         # alpha = config["alpha"]
         return_dic = {}
 
-        self.log(f"{self.client_name} - Evaluate(): FedMeta Model evaluation started", object="experiment_evaluate", object_id=self.id)
+        self.log(
+            f"{self.client_name} - Evaluate(): FedMeta Model evaluation started",
+            object="experiment_evaluate",
+            object_id=self.id,
+        )
 
         self.model.set_parameters(parameters)
-        self.log(f"{self.client_name} - Evaluate(): Global model loaded", object="experiment_evaluate", object_id=self.id)
-
+        # self.log(f"{self.client_name} - Evaluate(): Global model loaded", object="experiment_evaluate", object_id=self.id)
 
         self.epoch_fl = config["server_round"]
         loss, values_metrics_validation = self.validation_loop(
-            self.dataset.dataloader(validation=True), 
-            self.lr
+            self.dataset.dataloader(validation=True), self.lr
         )
         values_metrics_validation["LOSS"] = loss
 

@@ -1,6 +1,11 @@
 from collections import OrderedDict
 from typing import Dict, List, Optional, Tuple, Union
-from flautim.pytorch.common import run_federated, weighted_average
+from flautim.pytorch.common import (
+    weighted_average,
+    get_argparser,
+    get_pod_log_info,
+)  # , run_federated
+import logging
 import numpy as np
 import SmellRecurrenceModel
 import SmellRecurrenceDataset
@@ -54,11 +59,14 @@ def tensor_summary(name: str, tensor: torch.Tensor):
     """Return a compact summary of a tensor for logging."""
     if tensor is None:
         return f"{name}: None"
-    return (f"{name}: shape={tuple(tensor.shape)}, "
-            f"mean={tensor.mean().item():.6f}, "
-            f"std={tensor.std().item():.6f}, "
-            f"min={tensor.min().item():.6f}, "
-            f"max={tensor.max().item():.6f}")
+    return (
+        f"{name}: shape={tuple(tensor.shape)}, "
+        f"mean={tensor.mean().item():.6f}, "
+        f"std={tensor.std().item():.6f}, "
+        f"min={tensor.min().item():.6f}, "
+        f"max={tensor.max().item():.6f}"
+    )
+
 
 def fedmeta_update_maml(
     net: torch.nn.Module,
@@ -67,11 +75,11 @@ def fedmeta_update_maml(
     gradients_aggregated: NDArrays,
     weight_decay: float,
 ) -> NDArrays:
-    
+
     params_dict = zip(net.state_dict().keys(), weights_results)
     state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
     net.load_state_dict(state_dict, strict=True)
-    
+
     optimizer = torch.optim.Adam(
         list(net.parameters()), lr=beta, weight_decay=weight_decay
     )
@@ -146,7 +154,7 @@ class FedMeta(flwr.server.strategy.FedAvg):
             grads_file = fit_res.metrics.get("grads_file")
             if grads_file is None:
                 raise ValueError("No grads_file in metrics for a client!")
-            
+
             # Load the .npz file
             log(INFO, f"Reading file for: {grads_file}")
             file_path = f"gradients_{grads_file}.npz"
@@ -322,6 +330,47 @@ def evaluate_fn(context, test_data):
         pass
 
     return fn
+
+
+def run_federated(
+    client_fn, server_fn, name_log="flower.log", post_processing_fn=[], **kwargs
+):
+
+    # self.metrics = Config(metrics)
+
+    logging.basicConfig(
+        filename=name_log,
+        filemode="w",  # 'a' para append, 'w' para sobrescrever
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        level=logging.DEBUG,
+    )
+
+    flower_logger = logging.getLogger("flwr")
+    flower_logger.setLevel(logging.DEBUG)  # Ajustar conforme necessário
+
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.DEBUG)
+    console_handler.setFormatter(
+        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    )
+    flower_logger.addHandler(console_handler)
+
+    _, ctx, backend, logger, _ = get_argparser()
+    experiment_id = ctx.IDexperiment
+    path = ctx.path
+    output_path = ctx.output_path
+    num_clients = kwargs.get("num_clients", 10)
+    num_rounds = 15  # kwargs.get("num_rounds", ctx.rounds)
+
+    logger.log(
+        "Starting Flower Engine",
+        details="",
+        object="experiment_run",
+        object_id=experiment_id,
+    )
+    logger.log(
+        get_pod_log_info(), details="", object="experiment_run", object_id=experiment_id
+    )
 
 
 if __name__ == "__main__":
