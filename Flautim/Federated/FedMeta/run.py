@@ -3,7 +3,7 @@ from typing import List, Optional, Tuple, Union
 from flautim.pytorch.common import run_federated, weighted_average
 import numpy as np
 import RecurrenceModel
-import FedMetaRecurrenceDataset
+import FedMetaRecurrenceDatasetnew
 import FedMetaRecurrenceExperiment
 import flwr
 import torch
@@ -27,6 +27,7 @@ NUM_CHANNELS = 6
 BATCH_SIZE = 32
 NUM_ROUNDS = 100
 NUM_EPOCHS = 5
+EMB_DIM = 64
 
 def fedmeta_update_maml(
     net: torch.nn.Module,
@@ -233,8 +234,8 @@ def generate_server_fn(context, eval_fn=None):
             lr_outer=1e-4,
             initial_parameters=params,
             evaluate_metrics_aggregation_fn=weighted_average,
-            fraction_fit=FRACTION_FIT,
-            fraction_evaluate=FRACTION_EVALUATE,
+            fraction_fit=0.4,
+            fraction_evaluate=1.0,
             evaluate_fn=eval_fn,
             on_fit_config_fn=fit_config,
             on_evaluate_config_fn=fit_config,
@@ -256,10 +257,10 @@ def generate_client_fn(context, files, test_file):
             context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=cid
         )
 
-        dataset = FedMetaRecurrenceDataset.RecurrenceDataset(
+        dataset = FedMetaRecurrenceDatasetnew.RecurrenceDatasetnew(
             train_file=file,
             test_file=test_file,
-            augment_multiplier=AUGMENTATION,
+            augment_multiplier=2,
             use_crop=False,
             use_erase=False,
             use_jitter=False,
@@ -295,6 +296,7 @@ if __name__ == "__main__":
         context = fl.init()
         # Generate a random seed
         seed = random.randint(0, 2**32 - 1)
+        seed = 2270238713
         random.seed(seed)
         fl.log(f"Using random seed: {seed}")
 
@@ -311,9 +313,6 @@ if __name__ == "__main__":
             LEARNING_RATE_STEP = 3
             LEARNING_RATE_GAMMA = 0.5
             WEIGHT_DECAY = 6.7e-5
-            FRACTION_FIT = 0.5
-            FRACTION_EVALUATE = 1.0
-            AUGMENTATION = 2
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
@@ -343,8 +342,8 @@ if __name__ == "__main__":
 
         elif DATASET == "WISDM":
             # Number of training clients
-            TOTAL_USERS = 51
-            NUM_CLIENTS = 41
+            TOTAL_USERS = 51 - 3
+            NUM_CLIENTS = 41 - 3
             TEST_USERS = TOTAL_USERS - NUM_CLIENTS
             NUM_CLASSES = 5
             WINDOW_SIZE = 256
@@ -354,11 +353,8 @@ if __name__ == "__main__":
             LEARNING_RATE_STEP = 3
             LEARNING_RATE_GAMMA = 0.5
             WEIGHT_DECAY = 1.1e-5
-            FRACTION_FIT = 0.1
-            FRACTION_EVALUATE = 0.4
-            AUGMENTATION = 0
 
-            all_files = [i for i in range(1, TOTAL_USERS + 1)]
+            all_files = [i for i in range(1, TOTAL_USERS + 1) if i not in [38, 41, 44]]
 
             # Shuffle and split
             test_files = random.sample(all_files, TEST_USERS)

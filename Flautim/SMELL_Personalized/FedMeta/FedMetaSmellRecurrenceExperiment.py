@@ -330,194 +330,207 @@ class RecurrenceExperiment(Experiment):
 
     #         # fl.log(f'Pretrain Epoch [{epoch+1}/{num_epochs}], Loss: {running_loss/len(dataloader):.4f}')
 
-    def generate_pairs(self, X, Y, N):
-        # Ensure N is even
-        if N % 2 != 0:
-            raise ValueError("N must be an even number.")
 
-        num_same_label_pairs = N // 2
-        num_different_label_pairs = N // 2
+    def generate_pair_indices(
+        self,
+        Y: torch.Tensor,
+        N: int,
+        allow_repeat: bool = True,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Build index pairs inside the *current batch* using labels Y.
 
-        # Precompute label indices
-        label_to_indices = {
-            label.item(): (Y == label).nonzero(as_tuple=True)[0].tolist()
-            for label in torch.unique(Y)
-        }
+        - If only one class is present, only similar pairs are produced.
+        - If not enough unique pairs exist, we either cap N or (if allow_repeat=True)
+        we sample with replacement to meet the target.
+        - Returns empty tensors if no pairs can be formed.
 
-        X1, X2, labels = [], [], []
+        Returns:
+        idx1 [P], idx2 [P], y [P]  (on same device as Y)
+        """
+        device = Y.device
+        N = int(N)
+        if N <= 0:
+            return (torch.empty(0, dtype=torch.long, device=device),
+                    torch.empty(0, dtype=torch.long, device=device),
+                    torch.empty(0, dtype=torch.float32, device=device))
 
-        # Generate similar pairs (same label)
-        for _ in range(num_same_label_pairs):
-            # Sample a label that has more than one instance
-            while True:
-                sampled_label = random.choice(list(label_to_indices.keys()))
-                indices = label_to_indices[sampled_label]
-                if len(indices) > 1:
-                    # Randomly sample two distinct indices for the same label
-                    idx1, idx2 = random.sample(indices, 2)
-                    X1.append(X[idx1])
-                    X2.append(X[idx2])
-                    labels.append(1)  # Similar pair label
-                    # Ensure the label has more than one element
+        # Map: label -> indices in this batch
+        uniques = torch.unique(Y)
+        label_to_idx = {int(l.item()): (Y == l).nonzero(as_tuple=True)[0] for l in uniques}
+
+        # Count max unique similar/dissimilar pairs possible in this batch
+        # similar: sum over labels of C(n_l, 2)
+        # dissimilar: sum over l1<l2 of n_l1 * n_l2
+        sizes = [idx.numel() for idx in label_to_idx.values()]
+        max_similar = sum(max(0, n * (n - 1) // 2) for n in sizes)
+        if len(sizes) >= 2:
+            total = sum(sizes)
+            sum_sq = sum(n * n for n in sizes)
+            max_dissimilar = (total * total - sum_sq) // 2  # = sum_{i<j} n_i n_j
+        else:
+            max_dissimilar = 0
+
+        # target split (half/half), then cap by feasibility
+        target_sim = N // 2
+        target_dis = N - target_sim
+
+        # If only one class exists, force dis=0 and push all to sim
+        if len(sizes) < 2:
+            target_dis = 0
+            target_sim = min(N, max_similar) if not allow_repeat else N
+
+        # Cap by unique counts if not allowing repeats
+        if not allow_repeat:
+            target_sim = min(target_sim, max_similar)
+            target_dis = min(target_dis, max_dissimilar)
+
+        # If both are zero and repeats not allowed (e.g., tiny batch), return empties
+        if target_sim <= 0 and target_dis <= 0:
+            return (torch.empty(0, dtype=torch.long, device=device),
+                    torch.empty(0, dtype=torch.long, device=device),
+                    torch.empty(0, dtype=torch.float32, device=device))
+
+        idx1_list, idx2_list, y_list = [], [], []
+
+        # --- Similar pairs ---
+        if target_sim > 0:
+            # For each label with >=2 samples, create pairs
+            # We’ll generate with replacement if needed.
+            for _ in range(target_sim):
+                # pick a label with n>=2
+                valid_labels = [k for k, v in label_to_idx.items() if v.numel() >= 2]
+                if not valid_labels:
                     break
+                l = random.choice(valid_labels)
+                v = label_to_idx[l]
+                # sample two distinct indices; if allow_repeat, we just sample again
+                if v.numel() >= 2:
+                    # draw two different positions
+                    i1, i2 = random.sample(range(v.numel()), 2) if v.numel() >= 2 else (0, 0)
+                    idx1_list.append(v[i1].item())
+                    idx2_list.append(v[i2].item())
+                    y_list.append(1.0)
 
-        # Generate dissimilar pairs (different labels)
-        for _ in range(num_different_label_pairs):
-            # Sample two different labels
-            while len(list(label_to_indices.keys())) >= 2:
+        # --- Dissimilar pairs ---
+        if target_dis > 0 and len(label_to_idx) >= 2:
+            labels_list = list(label_to_idx.keys())
+            for _ in range(target_dis):
+                if len(labels_list) < 2:
+                    break
+                # choose two different labels; with repeat we can reuse previously used combinations
+                l1, l2 = random.sample(labels_list, 2)
+                v1, v2 = label_to_idx[l1], label_to_idx[l2]
+                if v1.numel() == 0 or v2.numel() == 0:
+                    continue
+                i1 = v1[random.randrange(v1.numel())].item()
+                i2 = v2[random.randrange(v2.numel())].item()
+                idx1_list.append(i1)
+                idx2_list.append(i2)
+                y_list.append(0.0)
 
-                label1, label2 = random.sample(list(label_to_indices.keys()), 2)
-                idx1 = random.choice(label_to_indices[label1])
-                idx2 = random.choice(label_to_indices[label2])
-                # Directly add the dissimilar pairs
-                X1.append(X[idx1])
-                X2.append(X[idx2])
-                labels.append(0)  # Dissimilar pair label
-                break
+        # Pack to tensors on the right device
+        if len(y_list) == 0:
+            return (torch.empty(0, dtype=torch.long, device=device),
+                    torch.empty(0, dtype=torch.long, device=device),
+                    torch.empty(0, dtype=torch.float32, device=device))
 
-        # Convert lists to tensors efficiently in one go
-        X1 = torch.stack(X1)
-        X2 = torch.stack(X2)
-        labels = torch.tensor(labels)
+        idx1 = torch.tensor(idx1_list, dtype=torch.long, device=device)
+        idx2 = torch.tensor(idx2_list, dtype=torch.long, device=device)
+        y    = torch.tensor(y_list,    dtype=torch.float32, device=device)
+        return idx1, idx2, y
 
-        return X1, X2, labels
+
 
     def train_model(self, model, train_loader, alpha, num_epochs=1, log=False):
         if log:
-            self.log(
-                f"{self.client_name} - Evaluate(): Trainning adapted model started",
-                object_id=self.id,
-            )
-        for i in range(num_epochs):
+            self.log(f"{self.client_name} - Evaluate(): Trainning adapted model started", object_id=self.id)
+
+        scaler = torch.cuda.amp.GradScaler(enabled=True)
+
+        model.train()
+        for epoch in range(num_epochs):
             total_loss, total_samples = 0.0, 0
             if log:
-                self.log(
-                    f"{self.client_name} - Evaluate(): Epoch - {i} Started",
-                    object_id=self.id,
-                )
+                self.log(f"{self.client_name} - Evaluate(): Epoch - {epoch} Started", object_id=self.id)
 
             for batch_data, batch_labels in train_loader:
-                pairs1, pairs2, labels = self.generate_pairs(
-                    batch_data.to(self.device), batch_labels.to(self.device), 200
-                )
-                pairs1, pairs2, labels = (
-                    pairs1.to(self.device),
-                    pairs2.to(self.device),
-                    labels.to(self.device),
-                )
+                batch_data = batch_data.to(self.device, non_blocking=True).float()
+                batch_labels = batch_labels.to(self.device, non_blocking=True)
 
+                # Forward once
                 with autocast(enabled=True):
-                    embeddings_x1 = model(pairs1.float())
-                    embeddings_x2 = model(pairs2.float())
-                    loss = self.criterion(
-                        embeddings_x1, embeddings_x2, labels.to(self.device)
-                    )
+                    embeddings = model(batch_data)  # [B, D]
 
-                total_loss += loss.item() * labels.size(0)
-                total_samples += labels.size(0)
+                # Build pairs in embedding space
+                idx1, idx2, y = self.generate_pair_indices(batch_labels, N=200)
+                with autocast(enabled=True):
+                    e1 = embeddings.index_select(0, idx1)
+                    e2 = embeddings.index_select(0, idx2)
+                    loss = self.criterion(e1, e2, y)
 
-                grads = torch.autograd.grad(
-                    loss, list(model.parameters()), create_graph=False
-                )
+                total_loss += loss.item() * y.size(0)
+                total_samples += y.size(0)
 
-                # Update parameters without tracking gradients
+                # Meta-style one-step update (no optimizer state)
+                grads = torch.autograd.grad(loss, list(model.parameters()), create_graph=False)
+
                 with torch.no_grad():
-                    for param, grad_ in zip(model.parameters(), grads):
-                        if grad_ is not None:
-                            param -= alpha * grad_
+                    for p, g in zip(model.parameters(), grads):
+                        if g is not None:
+                            p -= alpha * g
 
-                # Clear tensors to avoid graph accumulation
-                del (
-                    grads,
-                    embeddings_x1,
-                    embeddings_x2,
-                    pairs1,
-                    pairs2,
-                    labels,
-                    loss,
-                    batch_data,
-                    batch_labels,
-                )
+                # Cleanup
+                del embeddings, e1, e2, idx1, idx2, y, grads, batch_data, batch_labels, loss
                 torch.cuda.empty_cache()
+
             if log:
-                self.log(
-                    f"{self.client_name} - Evaluate(): Epoch - {i} Finished",
-                    object_id=self.id,
-                )
-
+                self.log(f"{self.client_name} - Evaluate(): Epoch - {epoch} Finished", object_id=self.id)
             torch.cuda.synchronize()
+
         if log:
-            self.log(
-                f"{self.client_name} - Evaluate(): Training adapted model finished",
-                object_id=self.id,
-            )
+            self.log(f"{self.client_name} - Evaluate(): Training adapted model finished", object_id=self.id)
 
-        return total_loss / total_samples
+        return total_loss / max(1, total_samples)
 
-    def compute_query_loss(self, model, query_loader, num_samples_for_pairs=20):
-        model.eval()  # just evaluation mode, but gradients are tracked
+
+    def compute_query_loss(self, model, query_loader, num_samples_for_pairs=200):
+        model.train()  # grads needed
         grads_sum = [torch.zeros_like(p, device="cpu") for p in model.parameters()]
         total_samples = 0
 
         for batch_data, batch_labels in query_loader:
-            batch_data, batch_labels = batch_data.to(self.device), batch_labels.to(
-                self.device
-            )
-            batch_size = batch_labels.size(0)
-            total_samples += batch_size
-
-            # Generate pairs for loss computation
-            pairs_1, pairs_2, labels = self.generate_pairs(
-                batch_data, batch_labels, num_samples_for_pairs
-            )
-            pairs_1, pairs_2, labels = (
-                pairs_1.to(self.device),
-                pairs_2.to(self.device),
-                labels.to(self.device),
-            )
+            batch_data = batch_data.to(self.device, non_blocking=True).float()
+            batch_labels = batch_labels.to(self.device, non_blocking=True)
+            B = batch_labels.size(0)
+            total_samples += B
 
             with autocast(enabled=True):
-                # Forward pass
-                embeddings_x1 = model(pairs_1)
-                embeddings_x2 = model(pairs_2)
+                embeddings = model(batch_data)  # [B, D]
 
-                # Compute loss
-                loss = self.criterion(embeddings_x1, embeddings_x2, labels)
+            idx1, idx2, y = self.generate_pair_indices(batch_labels, num_samples_for_pairs)
+            with autocast(enabled=True):
+                e1 = embeddings.index_select(0, idx1)
+                e2 = embeddings.index_select(0, idx2)
+                loss = self.criterion(e1, e2, y)
 
-            # Compute per-batch grads, without graph
-            grads = torch.autograd.grad(
-                loss, list(model.parameters()), create_graph=False
-            )
+            grads = torch.autograd.grad(loss, list(model.parameters()), create_graph=False)
 
-            # Accumulate grads safely on CPU
             for i, g in enumerate(grads):
                 if g is not None:
-                    grads_sum[i] += g.detach().cpu() * batch_size
+                    grads_sum[i] += g.detach().cpu() * B
 
-            del (
-                embeddings_x1,
-                embeddings_x2,
-                loss,
-                grads,
-                pairs_1,
-                pairs_2,
-                labels,
-                batch_data,
-                batch_labels,
-            )
+            del embeddings, e1, e2, idx1, idx2, y, loss, grads, batch_data, batch_labels
             torch.cuda.empty_cache()
 
-        # Average grads across all samples
         avg_grads = [g / total_samples for g in grads_sum]
-
-        # Convert to numpy for Flower
         grads_np = [g.numpy() for g in avg_grads]
 
         del grads_sum, avg_grads
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
-
         return grads_np
+
 
     def fit(
         self, parameters: NDArrays, config: Dict[str, Scalar]
@@ -592,99 +605,56 @@ class RecurrenceExperiment(Experiment):
     # TESTING  FUNCTIONS ######
     ################################
 
-    def knn_in_embedding_space(
-        self, model, train_loader, test_loader, k=1, num_samples_for_pairs=20
-    ):
-
+    def knn_in_embedding_space(self, model, train_loader, test_loader, k=1, num_samples_for_pairs=200):
         model.eval()
 
-        # Collect train embeddings and labels
-        train_embeddings = []
-        train_labels = []
-
-        with torch.no_grad():
+        # collect train embeddings – use inference_mode and float16 on CPU
+        train_emb_list, train_lbl_list = [], []
+        with torch.inference_mode():
             for batch_data, batch_labels in train_loader:
-                # batch_data = batch_data.view(batch_data.size(0), -1).to(self.device)
-                batch_data = batch_data.to(self.device)
-                embeddings = model(batch_data)
-                train_embeddings.append(embeddings.cpu())
-                train_labels.append(batch_labels)
+                batch_data = batch_data.to(self.device, non_blocking=True).float()
+                emb = model(batch_data)
+                train_emb_list.append(emb.detach().cpu().to(torch.float16))  # 2x smaller
+                train_lbl_list.append(batch_labels.cpu())
+                del emb, batch_data, batch_labels
 
-                del embeddings, batch_data, batch_labels
-                torch.cuda.empty_cache()
+        train_embeddings = torch.cat(train_emb_list).numpy()           # float16 numpy
+        train_labels    = torch.cat(train_lbl_list).numpy()
 
-        train_embeddings = torch.cat(train_embeddings).cpu().numpy()
-        train_labels = torch.cat(train_labels).cpu().numpy()
-
-        # Initialize the k-NN classifier
         knn = KNeighborsClassifier(n_neighbors=k)
         knn.fit(train_embeddings, train_labels)
 
-        # Store predictions, true labels, and loss values
-        all_preds = []
-        all_labels = []
-        running_loss = 0.0
-        total_batches = 0
+        all_preds, all_labels = [], []
+        running_loss, total_batches = 0.0, 0
 
-        with torch.no_grad():
+        with torch.inference_mode():
             for batch_data, batch_labels in test_loader:
-                # batch_data = batch_data.view(batch_data.size(0), -1).to(self.device)
-                batch_data = batch_data.to(self.device)
-                embeddings = model(batch_data).cpu().numpy()
+                batch_data = batch_data.to(self.device, non_blocking=True).float()
+                emb = model(batch_data).detach().cpu().to(torch.float16).numpy()
+                preds = knn.predict(emb)
+                all_preds.extend(preds)
+                all_labels.extend(batch_labels.numpy())
 
-                # Perform k-NN classification in embedding space
-                predicted_labels = knn.predict(embeddings)
+                # compute pair loss on embeddings (no extra forwards)
+                # build pairs on GPU cheaply
+                batch_labels_gpu = torch.from_numpy(batch_labels.numpy()).to(self.device)
+                idx1, idx2, y = self.generate_pair_indices(batch_labels_gpu, num_samples_for_pairs)
 
-                # Store predictions and true labels
-                all_preds.extend(predicted_labels)
-                all_labels.extend(batch_labels.cpu().numpy())
-
-                # Compute loss based on pairs in the test set
-
-                # Generate pairs for loss computation
-                pairs_1, pairs_2, labels = self.generate_pairs(
-                    batch_data, batch_labels, num_samples_for_pairs
-                )
-                pairs_1, pairs_2, labels = (
-                    pairs_1.to(self.device),
-                    pairs_2.to(self.device),
-                    labels.to(self.device),
-                )
-
-                # Compute embeddings for pairs
-                embeddings_x1 = model(pairs_1)
-                embeddings_x2 = model(pairs_2)
-
-                # Compute loss
-                loss = self.criterion(embeddings_x1, embeddings_x2, labels)
-                running_loss += loss
+                emb_gpu = torch.from_numpy(emb).to(self.device).to(torch.float32)  # cast back for criterion if needed
+                e1 = emb_gpu.index_select(0, idx1)
+                e2 = emb_gpu.index_select(0, idx2)
+                loss = self.criterion(e1, e2, y)
+                running_loss += float(loss.item())
                 total_batches += 1
 
-                del (
-                    embeddings_x1,
-                    embeddings_x2,
-                    batch_data,
-                    batch_labels,
-                    embeddings,
-                    pairs_1,
-                    pairs_2,
-                    labels,
-                )
+                del e1, e2, idx1, idx2, y, emb_gpu, emb, batch_data, batch_labels, batch_labels_gpu
                 torch.cuda.empty_cache()
 
-        # Average loss over all batches
-        if total_batches > 0:
-            avg_loss = running_loss / total_batches
-        else:
-            avg_loss = 0.0
-
-        print(f"Average loss on test set: {avg_loss:.4f}")
-
-        # Convert predictions and true labels to tensors for consistency
-        y_pred = torch.tensor(all_preds)
+        avg_loss = running_loss / max(1, total_batches)
+        y_pred  = torch.tensor(all_preds)
         y_label = torch.tensor(all_labels)
-
         return avg_loss, y_pred, y_label
+
 
     def test(self, model, trainloader, testloader):
         loss = 0.0

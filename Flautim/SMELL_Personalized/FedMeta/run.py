@@ -1,7 +1,6 @@
 from collections import OrderedDict
 from typing import Dict, List, Optional, Tuple, Union
-from flautim.pytorch.common import weighted_average, run_federated
-import logging
+from flautim.pytorch.common import run_federated, weighted_average
 import numpy as np
 import SmellRecurrenceModel
 import SmellRecurrenceDataset
@@ -55,14 +54,11 @@ def tensor_summary(name: str, tensor: torch.Tensor):
     """Return a compact summary of a tensor for logging."""
     if tensor is None:
         return f"{name}: None"
-    return (
-        f"{name}: shape={tuple(tensor.shape)}, "
-        f"mean={tensor.mean().item():.6f}, "
-        f"std={tensor.std().item():.6f}, "
-        f"min={tensor.min().item():.6f}, "
-        f"max={tensor.max().item():.6f}"
-    )
-
+    return (f"{name}: shape={tuple(tensor.shape)}, "
+            f"mean={tensor.mean().item():.6f}, "
+            f"std={tensor.std().item():.6f}, "
+            f"min={tensor.min().item():.6f}, "
+            f"max={tensor.max().item():.6f}")
 
 def fedmeta_update_maml(
     net: torch.nn.Module,
@@ -71,11 +67,11 @@ def fedmeta_update_maml(
     gradients_aggregated: NDArrays,
     weight_decay: float,
 ) -> NDArrays:
-
+    
     params_dict = zip(net.state_dict().keys(), weights_results)
     state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
     net.load_state_dict(state_dict, strict=True)
-
+    
     optimizer = torch.optim.Adam(
         list(net.parameters()), lr=beta, weight_decay=weight_decay
     )
@@ -150,7 +146,7 @@ class FedMeta(flwr.server.strategy.FedAvg):
             grads_file = fit_res.metrics.get("grads_file")
             if grads_file is None:
                 raise ValueError("No grads_file in metrics for a client!")
-
+            
             # Load the .npz file
             log(INFO, f"Reading file for: {grads_file}")
             file_path = f"gradients_{grads_file}.npz"
