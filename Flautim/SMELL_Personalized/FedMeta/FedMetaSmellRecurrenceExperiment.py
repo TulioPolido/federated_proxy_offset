@@ -271,22 +271,22 @@ class RecurrenceExperiment(Experiment):
             num_similar_prototypes=2,
             num_dissimilar_prototypes=2,
         ).to(self.device)
-        self.optimizer1 = torch.optim.Adam(
-            list(self.criterion.parameters()), lr=self.lr
-        )
-        self.optimizer2 = torch.torch.optim.SGD(
-            [{"params": self.model.parameters(), "lr": self.lr}]
-            + [{"params": self.criterion.parameters(), "lr": self.lr}]
-        )
+        # self.optimizer1 = torch.optim.Adam(
+        #     list(self.criterion.parameters()), lr=self.lr
+        # )
+        # self.optimizer2 = torch.torch.optim.SGD(
+        #     [{"params": self.model.parameters(), "lr": self.lr}]
+        #     + [{"params": self.criterion.parameters(), "lr": self.lr}]
+        # )
         self.pre_criterion = PrototypicalCenterLoss(
             num_classes=self.num_classes,
             embedding_size=self.embedding_size,
             margin=self.margin,
         ).to(self.device)
-        self.pre_optimizer = torch.optim.Adam(
-            list(model.parameters()) + list(self.pre_criterion.parameters()),
-            lr=self.pre_train_lr,
-        )
+        # self.pre_optimizer = torch.optim.Adam(
+        #     list(model.parameters()) + list(self.pre_criterion.parameters()),
+        #     lr=self.pre_train_lr,
+        # )
 
         self.scheduler = StepLR(self.optimizer1, step_size=lr_step, gamma=lr_gamma)
 
@@ -304,32 +304,33 @@ class RecurrenceExperiment(Experiment):
     # TRAINING FUNCTIONS ######
     ################################
 
-    # def pretrain_model_prototypical_center(self, model, dataloader, num_epochs):
+    def pretrain_model_prototypical_center(self, model, dataloader, num_epochs=1):
 
-    #     model.train()  # Set the model to training mode
+        model.train()  # Set the model to training mode
 
-    #     for epoch in range(num_epochs):
-    #         running_loss = 0.0
-    #         for batch_data, batch_labels in dataloader:
-    #             # batch_data = batch_data.view(batch_data.size(0), -1).to(device)
-    #             batch_data = batch_data.to(self.device)
-    #             batch_labels = batch_labels.to(self.device)
+        for epoch in range(num_epochs):
+            running_loss = 0.0
+            for batch_data, batch_labels in dataloader:
+                # batch_data = batch_data.view(batch_data.size(0), -1).to(device)
+                batch_data = batch_data.to(self.device)
+                batch_labels = batch_labels.to(self.device)
 
-    #             # Forward pass: compute embeddings
-    #             embeddings = model(batch_data.float())
+                # Forward pass: compute embeddings
+                embeddings = model(batch_data.float())
 
-    #             # Compute prototypical center loss
-    #             loss = self.pre_criterion(embeddings, batch_labels)
+                # Compute prototypical center loss
+                loss = self.pre_criterion(embeddings, batch_labels)
 
-    #             # Backpropagation and optimization
-    #             self.pre_optimizer.zero_grad()
-    #             loss.backward()
-    #             self.pre_optimizer.step()
+                # Backpropagation and optimization
+                self.pre_optimizer.zero_grad()
+                loss.backward()
+                self.pre_optimizer.step()
 
-    #             running_loss += loss.item()
+                running_loss += loss.item()
 
-    #         # fl.log(f'Pretrain Epoch [{epoch+1}/{num_epochs}], Loss: {running_loss/len(dataloader):.4f}')
-
+                del batch_data, batch_labels, embeddings, loss
+                torch.cuda.empty_cache()
+            torch.cuda.synchronize()
 
     def generate_pair_indices(
         self,
@@ -440,76 +441,108 @@ class RecurrenceExperiment(Experiment):
         y    = torch.tensor(y_list,    dtype=torch.float32, device=device)
         return idx1, idx2, y
 
-
-
-    def train_model(self, model, train_loader, alpha, num_epochs=1, log=False):
-        if log:
-            self.log(f"{self.client_name} - Evaluate(): Trainning adapted model started", object_id=self.id)
-
-        scaler = torch.cuda.amp.GradScaler(enabled=True)
+    def pre_train_model(self, model, dataloader, num_epochs=1, alpha=0.001):
 
         model.train()
+        self.pre_criterion.train()
+
+        # Combine parameters from model + pre_criterion
+        train_params = list(model.parameters()) + list(self.pre_criterion.parameters())
+
+        for epoch in range(num_epochs):
+            running_loss = 0.0
+
+            for batch_data, batch_labels in dataloader:
+                batch_data = batch_data.to(self.device)
+                batch_labels = batch_labels.to(self.device)
+
+                # Forward
+                embeddings = model(batch_data.float())
+                loss = self.pre_criterion(embeddings, batch_labels)
+
+                running_loss += loss.item()
+
+                # Compute gradients
+                grads = torch.autograd.grad(
+                    loss, train_params, create_graph=False, allow_unused=True
+                )
+
+                # Manual SGD update
+                with torch.no_grad():
+                    for p, g in zip(train_params, grads):
+                        if g is not None:
+                            p -= alpha * g
+
+                # Cleanup
+                del embeddings, loss, batch_data, batch_labels, grads
+                torch.cuda.empty_cache()
+
+            torch.cuda.synchronize()
+
+        return running_loss / max(1, len(dataloader))
+
+
+    def train_model(self, model, train_loader, alpha, num_epochs=1, only_markers=False):
+        model.train()
+        self.criterion.train()  # criterion has learnable params
+
+        # Choose params based on flag
+        if only_markers:
+            train_params = list(self.criterion.parameters())
+        else:
+            train_params = list(model.parameters()) + list(self.criterion.parameters())
+
         for epoch in range(num_epochs):
             total_loss, total_samples = 0.0, 0
-            if log:
-                self.log(f"{self.client_name} - Evaluate(): Epoch - {epoch} Started", object_id=self.id)
 
             for batch_data, batch_labels in train_loader:
                 batch_data = batch_data.to(self.device, non_blocking=True).float()
                 batch_labels = batch_labels.to(self.device, non_blocking=True)
 
-                # Forward once
                 with autocast(enabled=True):
-                    embeddings = model(batch_data)  # [B, D]
-
-                # Build pairs in embedding space
-                idx1, idx2, y = self.generate_pair_indices(batch_labels, N=200)
-                with autocast(enabled=True):
-                    e1 = embeddings.index_select(0, idx1)
-                    e2 = embeddings.index_select(0, idx2)
+                    idx1, idx2, y = self.generate_pair_indices(batch_labels, N=200)
+                    e1 = model(batch_data[idx1])
+                    e2 = model(batch_data[idx2])
                     loss = self.criterion(e1, e2, y)
 
                 total_loss += loss.item() * y.size(0)
                 total_samples += y.size(0)
 
-                # Meta-style one-step update (no optimizer state)
-                grads = torch.autograd.grad(loss, list(model.parameters()), create_graph=False)
+                # Compute gradients ONLY for chosen params
+                grads = torch.autograd.grad(
+                    loss, train_params, create_graph=False, allow_unused=True
+                )
 
+                # Manual SGD step
                 with torch.no_grad():
-                    for p, g in zip(model.parameters(), grads):
-                        if g is not None:
-                            p -= alpha * g
+                    for param, grad_ in zip(train_params, grads):
+                        if grad_ is not None:
+                            param -= alpha * grad_
 
-                # Cleanup
-                del embeddings, e1, e2, idx1, idx2, y, grads, batch_data, batch_labels, loss
+                del e1, e2, idx1, idx2, y, grads, batch_data, batch_labels, loss
                 torch.cuda.empty_cache()
 
-            if log:
-                self.log(f"{self.client_name} - Evaluate(): Epoch - {epoch} Finished", object_id=self.id)
             torch.cuda.synchronize()
-
-        if log:
-            self.log(f"{self.client_name} - Evaluate(): Training adapted model finished", object_id=self.id)
 
         return total_loss / max(1, total_samples)
 
 
+
     def compute_query_loss(self, model, query_loader, num_samples_for_pairs=200):
-        model.train()  # grads needed
+        model.eval()
+        self.criterion.eval()
         grads_sum = [torch.zeros_like(p, device="cpu") for p in model.parameters()]
         total_samples = 0
 
         for batch_data, batch_labels in query_loader:
             batch_data = batch_data.to(self.device, non_blocking=True).float()
             batch_labels = batch_labels.to(self.device, non_blocking=True)
-            B = batch_labels.size(0)
-            total_samples += B
-
-            with autocast(enabled=True):
-                embeddings = model(batch_data)  # [B, D]
+            batch_size = batch_labels.size(0)
+            total_samples += batch_size
 
             idx1, idx2, y = self.generate_pair_indices(batch_labels, num_samples_for_pairs)
             with autocast(enabled=True):
+                embeddings = model(batch_data)  # [B, D]
                 e1 = embeddings.index_select(0, idx1)
                 e2 = embeddings.index_select(0, idx2)
                 loss = self.criterion(e1, e2, y)
@@ -518,7 +551,7 @@ class RecurrenceExperiment(Experiment):
 
             for i, g in enumerate(grads):
                 if g is not None:
-                    grads_sum[i] += g.detach().cpu() * B
+                    grads_sum[i] += g.detach().cpu() * batch_size
 
             del embeddings, e1, e2, idx1, idx2, y, loss, grads, batch_data, batch_labels
             torch.cuda.empty_cache()
@@ -545,10 +578,8 @@ class RecurrenceExperiment(Experiment):
         )
         self.epoch_fl = config["server_round"]
 
-        # self.log(f"{self.client_name} - Fit(): Loading global model", object_id=self.id)
         # === Load global model ===
         self.model.set_parameters(parameters)
-        # self.log(f"{self.client_name} - Fit(): Global model loaded", object_id=self.id)
 
         # === Clear any old adapted model ===
         if hasattr(self, "adapted_model"):
@@ -556,45 +587,33 @@ class RecurrenceExperiment(Experiment):
             torch.cuda.empty_cache()
             gc.collect()
 
-        # self.log(f"{self.client_name} - Fit(): Loading dataset", object_id=self.id)
         # === Use provided splits ===
         support_loader, query_loader = self.dataset.dataloader(validation=False)
         total_len = len(support_loader.dataset) + len(query_loader.dataset)
-        # self.log(f"{self.client_name} - Fit(): Dataset loaded", object_id=self.id)
 
-        # self.log(f"{self.client_name} - Fit(): Creating adapted model", object_id=self.id)
         # === Inner loop: adapt model on support (train set) ===
         self.adapted_model = copy.deepcopy(self.model).to(self.device)
-        # self.log(f"{self.client_name} - Fit(): Adapted model created", object_id=self.id)
-
-        # self.log(f"{self.client_name} - Fit(): Adapted model training started", object_id=self.id)
-        loss = self.train_model(
-            self.adapted_model, support_loader, self.lr, self.epochs
-        )
-        # self.log(f"{self.client_name} - Fit(): Adapted model training finished", object_id=self.id)
+        loss = self.pre_train_model(self.adapted_model, support_loader, num_epochs=1, alpha=self.lr)
+        loss = self.train_model(self.adapted_model, support_loader, alpha=self.lr, num_epochs=(self.epochs/2), only_markers=True)
+        loss = self.train_model(self.adapted_model, support_loader, alpha=self.lr, num_epochs=self.epochs, only_markers=False)
 
         # === Outer loop: compute query loss on adapted model ===
-        # self.log(f"{self.client_name} - Fit(): Adapted model gradient calculation started", object_id=self.id)
         grads = self.compute_query_loss(self.adapted_model, query_loader)
-        # self.log(f"{self.client_name} - Fit(): Adapted model gradient calculation finished", object_id=self.id)
 
         # Define your target file path
         file_path = f"gradients_{self.client_name}.npz"
         np.savez(file_path, *grads)
-        # self.log(f"{self.client_name} - Fit(): Gradients saved", object_id=self.id)
 
         # Free adapted model after training
         del self.adapted_model, grads
         torch.cuda.empty_cache()
         gc.collect()
 
-        # self.log(f"{self.client_name} - Fit(): Adapted model deleted", object_id=self.id)
         self.log(
             f"{self.client_name} - Fit() FedMeta client training finished",
             object_id=self.id,
         )
 
-        # grads is already a list of numpy arrays
         return (
             self.model.get_parameters(),
             total_len,
@@ -606,7 +625,6 @@ class RecurrenceExperiment(Experiment):
     ################################
 
     def knn_in_embedding_space(self, model, train_loader, test_loader, k=1, num_samples_for_pairs=200):
-        model.eval()
 
         # collect train embeddings – use inference_mode and float16 on CPU
         train_emb_list, train_lbl_list = [], []
@@ -619,7 +637,7 @@ class RecurrenceExperiment(Experiment):
                 del emb, batch_data, batch_labels
 
         train_embeddings = torch.cat(train_emb_list).numpy()           # float16 numpy
-        train_labels    = torch.cat(train_lbl_list).numpy()
+        train_labels = torch.cat(train_lbl_list).numpy()
 
         knn = KNeighborsClassifier(n_neighbors=k)
         knn.fit(train_embeddings, train_labels)
@@ -650,6 +668,12 @@ class RecurrenceExperiment(Experiment):
                 del e1, e2, idx1, idx2, y, emb_gpu, emb, batch_data, batch_labels, batch_labels_gpu
                 torch.cuda.empty_cache()
 
+        self.log(
+            f"{self.client_name} - Evaluate(): FedMeta Model evaluation started",
+            object="experiment_evaluate",
+            object_id=self.id,
+        )
+
         avg_loss = running_loss / max(1, total_batches)
         y_pred  = torch.tensor(all_preds)
         y_label = torch.tensor(all_labels)
@@ -660,26 +684,36 @@ class RecurrenceExperiment(Experiment):
         loss = 0.0
         model.to(self.device)
         model.eval()
+        self.criterion.eval()
 
-        accuracy = MulticlassAccuracy(num_classes=self.num_classes, average="macro").to(
-            self.device
-        )
-        precision = MulticlassPrecision(
-            num_classes=self.num_classes, average="macro"
+        accuracy = MulticlassAccuracy(
+            num_classes=self.num_classes,
+              average=None #"macro"
         ).to(self.device)
-        recall = MulticlassRecall(num_classes=self.num_classes, average="macro").to(
-            self.device
-        )
-        f1 = MulticlassF1Score(num_classes=self.num_classes, average="macro").to(
-            self.device
-        )
-        conf_matrix = MulticlassConfusionMatrix(num_classes=self.num_classes).to(
-            self.device
-        )
+
+        precision = MulticlassPrecision(
+            num_classes=self.num_classes, 
+            average="macro"
+        ).to(self.device)
+
+        recall = MulticlassRecall(
+            num_classes=self.num_classes, 
+            average="macro"
+        ).to(self.device)
+
+        f1 = MulticlassF1Score(
+            num_classes=self.num_classes, 
+            average="macro"
+            ).to(self.device)
+        
+        conf_matrix = MulticlassConfusionMatrix(
+            num_classes=self.num_classes
+        ).to(self.device)
 
         loss, predicted, label = self.knn_in_embedding_space(
             model, trainloader, testloader
         )
+
         predicted = torch.tensor(predicted).to(self.device)
         label = torch.tensor(label).to(self.device)
 
@@ -689,43 +723,28 @@ class RecurrenceExperiment(Experiment):
         f1.update(predicted, label)
         conf_matrix.update(predicted, label)
 
-        acc = accuracy.compute().item()
+        acc = accuracy.compute().mean().item()          # macro average manually
+        acc_per_class = accuracy.compute().cpu().numpy().tolist()
         prec = precision.compute().item()
         rec = recall.compute().item()
         f1_score = f1.compute().item()
         conf = conf_matrix.compute().cpu().numpy()
 
-        return float(loss), acc, prec, rec, f1_score, conf
+        return float(loss), acc, acc_per_class, prec, rec, f1_score, conf
 
     def validation_loop(self, data_loaders, alpha):
         support_loader, query_loader = data_loaders
-        # self.log(f"{self.client_name} - Evaluate(): Datasets loaded", object="experiment_evaluate", object_id=self.id)
 
-        # ---- Inner loop adaptation ----
-        # self.log(f"{self.client_name} - Evaluate(): Adapted model traning started", object="experiment_evaluate", object_id=self.id)
-        self.log(
-            f"{self.client_name} - Evaluate(): Adapted model copying",
-            object="experiment_evaluate",
-            object_id=self.id,
-        )
-
+        # === Inner loop: adapt model on support (train set) ===
         self.adapted_model = copy.deepcopy(self.model).to(self.device)
-        self.log(
-            f"{self.client_name} - Evaluate(): Adapted model copied",
-            object="experiment_evaluate",
-            object_id=self.id,
-        )
-
-        loss = self.train_model(self.adapted_model, support_loader, alpha, 2, log=True)
-        # self.log(f"{self.client_name} - Evaluate(): Adapted model training finished", object="experiment_evaluate", object_id=self.id)
+        self.pre_train_model(self.adapted_model, support_loader, num_epochs=1, alpha=self.lr)
+        self.train_model(self.adapted_model, support_loader, alpha=self.lr, num_epochs=(self.epochs/2), only_markers=True)
+        self.train_model(self.adapted_model, support_loader, alpha=self.lr, num_epochs=self.epochs, only_markers=False)
 
         # ---- Evaluate adapted model on query set ----
-        # self.log(f"{self.client_name} - Evaluate(): Adapted model test started", object="experiment_evaluate", object_id=self.id)
-
-        loss_avg, acc, prec, rec, f1, conf = self.test(
+        loss_avg, acc, acc_per_class, prec, rec, f1, conf = self.test(
             self.adapted_model, support_loader, query_loader
         )
-        # self.log(f"{self.client_name} - Evaluate(): Adapted model test finished", object="experiment_evaluate", object_id=self.id)
 
         torch.cuda.empty_cache()
         return loss_avg, {
@@ -748,7 +767,6 @@ class RecurrenceExperiment(Experiment):
         )
 
         self.model.set_parameters(parameters)
-        # self.log(f"{self.client_name} - Evaluate(): Global model loaded", object="experiment_evaluate", object_id=self.id)
 
         self.epoch_fl = config["server_round"]
         loss, values_metrics_validation = self.validation_loop(

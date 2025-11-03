@@ -342,8 +342,8 @@ if __name__ == "__main__":
 
         elif DATASET == "WISDM":
             # Number of training clients
-            TOTAL_USERS = 51 - 3
-            NUM_CLIENTS = 41 - 3
+            TOTAL_USERS = 10# 51
+            NUM_CLIENTS = 8 # 41
             TEST_USERS = TOTAL_USERS - NUM_CLIENTS
             NUM_CLASSES = 5
             WINDOW_SIZE = 256

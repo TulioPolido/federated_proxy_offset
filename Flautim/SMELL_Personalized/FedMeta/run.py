@@ -3,7 +3,7 @@ from typing import Dict, List, Optional, Tuple, Union
 from flautim.pytorch.common import run_federated, weighted_average
 import numpy as np
 import SmellRecurrenceModel
-import SmellRecurrenceDataset
+import FedMetaRecurrenceDataset
 import FedMetaSmellRecurrenceExperiment
 import flwr
 import torch
@@ -28,7 +28,7 @@ from flwr.server.strategy.aggregate import aggregate, weighted_loss_avg
 import flautim as fl
 import random
 
-DATASET = "PAMAP"
+DATASET = "WISDM"
 NUM_CHANNELS = 6
 BATCH_SIZE = 32
 NUM_ROUNDS = 100
@@ -288,7 +288,7 @@ def generate_client_fn(context, files, test_file):
             context, emb_dim=EMB_DIM, num_channels=NUM_CHANNELS, suffix=cid
         )
 
-        dataset = SmellRecurrenceDataset.RecurrenceDataset(
+        dataset = FedMetaRecurrenceDataset.RecurrenceDataset(
             train_file=file,
             test_file=test_file,
             augment_multiplier=AUGMENTATION,
