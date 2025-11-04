@@ -358,7 +358,7 @@ class RecurrenceExperiment(Experiment):
 
         # Map: label -> indices in this batch
         uniques = torch.unique(Y)
-        label_to_idx = {int(l.item()): (Y == l).nonzero(as_tuple=True)[0] for l in uniques}
+        label_to_idx = {int(lbl.item()): (Y == lbl).nonzero(as_tuple=True)[0] for lbl in uniques}
 
         # Count max unique similar/dissimilar pairs possible in this batch
         # similar: sum over labels of C(n_l, 2)
@@ -403,8 +403,8 @@ class RecurrenceExperiment(Experiment):
                 valid_labels = [k for k, v in label_to_idx.items() if v.numel() >= 2]
                 if not valid_labels:
                     break
-                l = random.choice(valid_labels)
-                v = label_to_idx[l]
+                lb = random.choice(valid_labels)
+                v = label_to_idx[lb]
                 # sample two distinct indices; if allow_repeat, we just sample again
                 if v.numel() >= 2:
                     # draw two different positions
@@ -738,8 +738,8 @@ class RecurrenceExperiment(Experiment):
         # === Inner loop: adapt model on support (train set) ===
         self.adapted_model = copy.deepcopy(self.model).to(self.device)
         self.pre_train_model(self.adapted_model, support_loader, num_epochs=1, alpha=self.lr)
-        self.train_model(self.adapted_model, support_loader, alpha=self.lr, num_epochs=(self.epochs/2), only_markers=True)
-        self.train_model(self.adapted_model, support_loader, alpha=self.lr, num_epochs=self.epochs, only_markers=False)
+        self.train_model(self.adapted_model, support_loader, alpha=self.lr, num_epochs=1, only_markers=True)
+        self.train_model(self.adapted_model, support_loader, alpha=self.lr, num_epochs=1, only_markers=False)
 
         # ---- Evaluate adapted model on query set ----
         loss_avg, acc, acc_per_class, prec, rec, f1, conf = self.test(

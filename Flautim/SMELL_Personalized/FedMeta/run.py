@@ -28,7 +28,7 @@ from flwr.server.strategy.aggregate import aggregate, weighted_loss_avg
 import flautim as fl
 import random
 
-DATASET = "WISDM"
+DATASET = "PAMAP"
 NUM_CHANNELS = 6
 BATCH_SIZE = 32
 NUM_ROUNDS = 100
