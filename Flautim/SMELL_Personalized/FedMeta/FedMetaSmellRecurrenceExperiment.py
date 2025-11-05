@@ -288,7 +288,7 @@ class RecurrenceExperiment(Experiment):
         #     lr=self.pre_train_lr,
         # )
 
-        self.scheduler = StepLR(self.optimizer1, step_size=lr_step, gamma=lr_gamma)
+        # self.scheduler = StepLR(self.optimizer1, step_size=lr_step, gamma=lr_gamma)
 
     def get_parameters(self, config: Dict[str, Scalar]) -> NDArrays:
         """Return the parameters of the current net."""
@@ -303,34 +303,6 @@ class RecurrenceExperiment(Experiment):
     ################################
     # TRAINING FUNCTIONS ######
     ################################
-
-    def pretrain_model_prototypical_center(self, model, dataloader, num_epochs=1):
-
-        model.train()  # Set the model to training mode
-
-        for epoch in range(num_epochs):
-            running_loss = 0.0
-            for batch_data, batch_labels in dataloader:
-                # batch_data = batch_data.view(batch_data.size(0), -1).to(device)
-                batch_data = batch_data.to(self.device)
-                batch_labels = batch_labels.to(self.device)
-
-                # Forward pass: compute embeddings
-                embeddings = model(batch_data.float())
-
-                # Compute prototypical center loss
-                loss = self.pre_criterion(embeddings, batch_labels)
-
-                # Backpropagation and optimization
-                self.pre_optimizer.zero_grad()
-                loss.backward()
-                self.pre_optimizer.step()
-
-                running_loss += loss.item()
-
-                del batch_data, batch_labels, embeddings, loss
-                torch.cuda.empty_cache()
-            torch.cuda.synchronize()
 
     def generate_pair_indices(
         self,
@@ -593,9 +565,13 @@ class RecurrenceExperiment(Experiment):
 
         # === Inner loop: adapt model on support (train set) ===
         self.adapted_model = copy.deepcopy(self.model).to(self.device)
-        loss = self.pre_train_model(self.adapted_model, support_loader, num_epochs=1, alpha=self.lr)
-        loss = self.train_model(self.adapted_model, support_loader, alpha=self.lr, num_epochs=(self.epochs/2), only_markers=True)
-        loss = self.train_model(self.adapted_model, support_loader, alpha=self.lr, num_epochs=self.epochs, only_markers=False)
+
+        if self.epoch_fl <= 5:
+            loss = self.pre_train_model(self.adapted_model, support_loader, alpha=self.pre_train_lr, num_epochs=self.num_epochs)
+        elif self.epoch_fl <= 40:
+            loss = self.train_model(self.adapted_model, support_loader, alpha=self.lr, num_epochs=self.epochs, only_markers=True)
+        else:
+            loss = self.train_model(self.adapted_model, support_loader, alpha=self.lr, num_epochs=self.epochs, only_markers=False)
 
         # === Outer loop: compute query loss on adapted model ===
         grads = self.compute_query_loss(self.adapted_model, query_loader)
@@ -737,21 +713,30 @@ class RecurrenceExperiment(Experiment):
 
         # === Inner loop: adapt model on support (train set) ===
         self.adapted_model = copy.deepcopy(self.model).to(self.device)
-        self.pre_train_model(self.adapted_model, support_loader, num_epochs=1, alpha=self.lr)
-        self.train_model(self.adapted_model, support_loader, alpha=self.lr, num_epochs=1, only_markers=True)
-        self.train_model(self.adapted_model, support_loader, alpha=self.lr, num_epochs=1, only_markers=False)
+
+        if self.epoch_fl <= 5:
+            self.pre_train_model(self.adapted_model, support_loader, alpha=self.pre_train_lr, num_epochs=2)
+        elif self.epoch_fl <= 40:
+            self.train_model(self.adapted_model, support_loader, alpha=self.lr, num_epochs=2, only_markers=True)
+        else:
+            self.train_model(self.adapted_model, support_loader, alpha=self.lr, num_epochs=2, only_markers=False)
 
         # ---- Evaluate adapted model on query set ----
         loss_avg, acc, acc_per_class, prec, rec, f1, conf = self.test(
             self.adapted_model, support_loader, query_loader
         )
 
+        # build per-class accuracy mapping
+        acc_per_class_dict = {f"TEST_ACC_CLASS_{i}": v for i, v in enumerate(acc_per_class)}
+
         torch.cuda.empty_cache()
+
         return loss_avg, {
             "TEST_ACC": acc,
             "TEST_PREC": prec,
             "Recall": rec,
             "TEST_F1": f1,
+            #**acc_per_class_dict  # add per-class metrics to the output dictionary
         }
 
     def evaluate(
