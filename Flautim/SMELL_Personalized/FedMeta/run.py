@@ -340,8 +340,8 @@ if __name__ == "__main__":
             NUM_CLASSES = 7
             WINDOW_SIZE = 1024
             STRIDE = 256
-            PRE_TRAIN_LEARNING_RATE = 1e-3
-            LEARNING_RATE = 1e-4
+            PRE_TRAIN_LEARNING_RATE = 1e-4
+            LEARNING_RATE = 1e-5
             LEARNING_RATE_STEP = 10
             LEARNING_RATE_GAMMA = 0.8
             WEIGHT_DECAY = 6.7e-5

@@ -550,6 +550,10 @@ class RecurrenceExperiment(Experiment):
         )
         self.epoch_fl = config["server_round"]
 
+        # === Load prototypes ===
+        prots_file_path = f"prototypes_{self.client_name}.npz"
+        self.criterion.load_state_dict(torch.load(prots_file_path, map_location=self.device))
+
         # === Load global model ===
         self.model.set_parameters(parameters)
 
@@ -566,6 +570,13 @@ class RecurrenceExperiment(Experiment):
         # === Inner loop: adapt model on support (train set) ===
         self.adapted_model = copy.deepcopy(self.model).to(self.device)
 
+        # Log prototype values BEFORE training this round
+        with torch.no_grad():
+            proto_slice = next(self.criterion.parameters()).view(-1)[:5].cpu().numpy()
+            norm = sum(p.norm().item() for p in self.criterion.parameters())
+            self.log(f"{self.client_name} - [START] Proto slice: {proto_slice}", object_id=self.id)
+            self.log(f"{self.client_name} - [START] Proto norm: {norm:.4f}", object_id=self.id)
+
         if self.epoch_fl <= 5:
             loss = self.pre_train_model(self.adapted_model, support_loader, alpha=self.pre_train_lr, num_epochs=self.num_epochs)
         elif self.epoch_fl <= 40:
@@ -573,12 +584,21 @@ class RecurrenceExperiment(Experiment):
         else:
             loss = self.train_model(self.adapted_model, support_loader, alpha=self.lr, num_epochs=self.epochs, only_markers=False)
 
+        with torch.no_grad():
+            proto_slice = next(self.criterion.parameters()).view(-1)[:5].cpu().numpy()
+            norm = sum(p.norm().item() for p in self.criterion.parameters())
+            self.log(f"{self.client_name} - [END] Proto slice: {proto_slice}", object_id=self.id)
+            self.log(f"{self.client_name} - [END] Proto norm: {norm:.4f}", object_id=self.id)
+
+        # Save prototypes
+        torch.save(self.criterion.state_dict(), prots_file_path)
+
         # === Outer loop: compute query loss on adapted model ===
         grads = self.compute_query_loss(self.adapted_model, query_loader)
 
         # Define your target file path
-        file_path = f"gradients_{self.client_name}.npz"
-        np.savez(file_path, *grads)
+        grads_file_path = f"gradients_{self.client_name}.npz"
+        np.savez(grads_file_path, *grads)
 
         # Free adapted model after training
         del self.adapted_model, grads
