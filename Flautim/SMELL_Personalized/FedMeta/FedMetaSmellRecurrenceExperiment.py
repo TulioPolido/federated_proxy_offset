@@ -2,6 +2,7 @@ from collections import OrderedDict
 from typing import Callable, Dict, List, Tuple
 import numpy as np
 import gc
+import os
 
 
 from flautim.pytorch.federated.Experiment import Experiment
@@ -22,6 +23,8 @@ from sklearn.neighbors import KNeighborsClassifier
 import flautim as fl
 from flwr.common.typing import NDArrays, Scalar
 import copy
+
+from sklearn.decomposition import PCA
 
 
 ###############################
@@ -324,13 +327,17 @@ class RecurrenceExperiment(Experiment):
         device = Y.device
         N = int(N)
         if N <= 0:
-            return (torch.empty(0, dtype=torch.long, device=device),
-                    torch.empty(0, dtype=torch.long, device=device),
-                    torch.empty(0, dtype=torch.float32, device=device))
+            return (
+                torch.empty(0, dtype=torch.long, device=device),
+                torch.empty(0, dtype=torch.long, device=device),
+                torch.empty(0, dtype=torch.float32, device=device),
+            )
 
         # Map: label -> indices in this batch
         uniques = torch.unique(Y)
-        label_to_idx = {int(lbl.item()): (Y == lbl).nonzero(as_tuple=True)[0] for lbl in uniques}
+        label_to_idx = {
+            int(lbl.item()): (Y == lbl).nonzero(as_tuple=True)[0] for lbl in uniques
+        }
 
         # Count max unique similar/dissimilar pairs possible in this batch
         # similar: sum over labels of C(n_l, 2)
@@ -360,9 +367,11 @@ class RecurrenceExperiment(Experiment):
 
         # If both are zero and repeats not allowed (e.g., tiny batch), return empties
         if target_sim <= 0 and target_dis <= 0:
-            return (torch.empty(0, dtype=torch.long, device=device),
-                    torch.empty(0, dtype=torch.long, device=device),
-                    torch.empty(0, dtype=torch.float32, device=device))
+            return (
+                torch.empty(0, dtype=torch.long, device=device),
+                torch.empty(0, dtype=torch.long, device=device),
+                torch.empty(0, dtype=torch.float32, device=device),
+            )
 
         idx1_list, idx2_list, y_list = [], [], []
 
@@ -380,7 +389,9 @@ class RecurrenceExperiment(Experiment):
                 # sample two distinct indices; if allow_repeat, we just sample again
                 if v.numel() >= 2:
                     # draw two different positions
-                    i1, i2 = random.sample(range(v.numel()), 2) if v.numel() >= 2 else (0, 0)
+                    i1, i2 = (
+                        random.sample(range(v.numel()), 2) if v.numel() >= 2 else (0, 0)
+                    )
                     idx1_list.append(v[i1].item())
                     idx2_list.append(v[i2].item())
                     y_list.append(1.0)
@@ -404,13 +415,15 @@ class RecurrenceExperiment(Experiment):
 
         # Pack to tensors on the right device
         if len(y_list) == 0:
-            return (torch.empty(0, dtype=torch.long, device=device),
-                    torch.empty(0, dtype=torch.long, device=device),
-                    torch.empty(0, dtype=torch.float32, device=device))
+            return (
+                torch.empty(0, dtype=torch.long, device=device),
+                torch.empty(0, dtype=torch.long, device=device),
+                torch.empty(0, dtype=torch.float32, device=device),
+            )
 
         idx1 = torch.tensor(idx1_list, dtype=torch.long, device=device)
         idx2 = torch.tensor(idx2_list, dtype=torch.long, device=device)
-        y    = torch.tensor(y_list,    dtype=torch.float32, device=device)
+        y = torch.tensor(y_list, dtype=torch.float32, device=device)
         return idx1, idx2, y
 
     def pre_train_model(self, model, dataloader, num_epochs=1, alpha=0.001):
@@ -452,7 +465,6 @@ class RecurrenceExperiment(Experiment):
             torch.cuda.synchronize()
 
         return running_loss / max(1, len(dataloader))
-
 
     def train_model(self, model, train_loader, alpha, num_epochs=1, only_markers=False):
         model.train()
@@ -498,8 +510,6 @@ class RecurrenceExperiment(Experiment):
 
         return total_loss / max(1, total_samples)
 
-
-
     def compute_query_loss(self, model, query_loader, num_samples_for_pairs=200):
         model.eval()
         self.criterion.eval()
@@ -512,14 +522,18 @@ class RecurrenceExperiment(Experiment):
             batch_size = batch_labels.size(0)
             total_samples += batch_size
 
-            idx1, idx2, y = self.generate_pair_indices(batch_labels, num_samples_for_pairs)
+            idx1, idx2, y = self.generate_pair_indices(
+                batch_labels, num_samples_for_pairs
+            )
             with autocast(enabled=True):
                 embeddings = model(batch_data)  # [B, D]
                 e1 = embeddings.index_select(0, idx1)
                 e2 = embeddings.index_select(0, idx2)
                 loss = self.criterion(e1, e2, y)
 
-            grads = torch.autograd.grad(loss, list(model.parameters()), create_graph=False)
+            grads = torch.autograd.grad(
+                loss, list(model.parameters()), create_graph=False
+            )
 
             for i, g in enumerate(grads):
                 if g is not None:
@@ -536,7 +550,6 @@ class RecurrenceExperiment(Experiment):
         torch.cuda.synchronize()
         return grads_np
 
-
     def fit(
         self, parameters: NDArrays, config: Dict[str, Scalar]
     ) -> Tuple[NDArrays, int, Dict]:
@@ -552,7 +565,10 @@ class RecurrenceExperiment(Experiment):
 
         # === Load prototypes ===
         prots_file_path = f"prototypes_{self.client_name}.npz"
-        self.criterion.load_state_dict(torch.load(prots_file_path, map_location=self.device))
+
+        if os.path.exists(prots_file_path):
+            state = torch.load(prots_file_path, map_location=self.device)
+            self.criterion.load_state_dict(state)
 
         # === Load global model ===
         self.model.set_parameters(parameters)
@@ -570,25 +586,29 @@ class RecurrenceExperiment(Experiment):
         # === Inner loop: adapt model on support (train set) ===
         self.adapted_model = copy.deepcopy(self.model).to(self.device)
 
-        # Log prototype values BEFORE training this round
-        with torch.no_grad():
-            proto_slice = next(self.criterion.parameters()).view(-1)[:5].cpu().numpy()
-            norm = sum(p.norm().item() for p in self.criterion.parameters())
-            self.log(f"{self.client_name} - [START] Proto slice: {proto_slice}", object_id=self.id)
-            self.log(f"{self.client_name} - [START] Proto norm: {norm:.4f}", object_id=self.id)
-
         if self.epoch_fl <= 5:
-            loss = self.pre_train_model(self.adapted_model, support_loader, alpha=self.pre_train_lr, num_epochs=self.num_epochs)
+            loss = self.pre_train_model(
+                self.adapted_model,
+                support_loader,
+                alpha=self.pre_train_lr,
+                num_epochs=self.num_epochs,
+            )
         elif self.epoch_fl <= 40:
-            loss = self.train_model(self.adapted_model, support_loader, alpha=self.lr, num_epochs=self.epochs, only_markers=True)
+            loss = self.train_model(
+                self.adapted_model,
+                support_loader,
+                alpha=self.lr,
+                num_epochs=self.epochs,
+                only_markers=True,
+            )
         else:
-            loss = self.train_model(self.adapted_model, support_loader, alpha=self.lr, num_epochs=self.epochs, only_markers=False)
-
-        with torch.no_grad():
-            proto_slice = next(self.criterion.parameters()).view(-1)[:5].cpu().numpy()
-            norm = sum(p.norm().item() for p in self.criterion.parameters())
-            self.log(f"{self.client_name} - [END] Proto slice: {proto_slice}", object_id=self.id)
-            self.log(f"{self.client_name} - [END] Proto norm: {norm:.4f}", object_id=self.id)
+            loss = self.train_model(
+                self.adapted_model,
+                support_loader,
+                alpha=self.lr,
+                num_epochs=self.epochs,
+                only_markers=False,
+            )
 
         # Save prototypes
         torch.save(self.criterion.state_dict(), prots_file_path)
@@ -620,7 +640,9 @@ class RecurrenceExperiment(Experiment):
     # TESTING  FUNCTIONS ######
     ################################
 
-    def knn_in_embedding_space(self, model, train_loader, test_loader, k=1, num_samples_for_pairs=200):
+    def knn_in_embedding_space(
+        self, model, train_loader, test_loader, k=1, num_samples_for_pairs=200
+    ):
 
         # collect train embeddings – use inference_mode and float16 on CPU
         train_emb_list, train_lbl_list = [], []
@@ -628,11 +650,13 @@ class RecurrenceExperiment(Experiment):
             for batch_data, batch_labels in train_loader:
                 batch_data = batch_data.to(self.device, non_blocking=True).float()
                 emb = model(batch_data)
-                train_emb_list.append(emb.detach().cpu().to(torch.float16))  # 2x smaller
+                train_emb_list.append(
+                    emb.detach().cpu().to(torch.float16)
+                )  # 2x smaller
                 train_lbl_list.append(batch_labels.cpu())
                 del emb, batch_data, batch_labels
 
-        train_embeddings = torch.cat(train_emb_list).numpy()           # float16 numpy
+        train_embeddings = torch.cat(train_emb_list).numpy()  # float16 numpy
         train_labels = torch.cat(train_lbl_list).numpy()
 
         knn = KNeighborsClassifier(n_neighbors=k)
@@ -651,17 +675,34 @@ class RecurrenceExperiment(Experiment):
 
                 # compute pair loss on embeddings (no extra forwards)
                 # build pairs on GPU cheaply
-                batch_labels_gpu = torch.from_numpy(batch_labels.numpy()).to(self.device)
-                idx1, idx2, y = self.generate_pair_indices(batch_labels_gpu, num_samples_for_pairs)
+                batch_labels_gpu = torch.from_numpy(batch_labels.numpy()).to(
+                    self.device
+                )
+                idx1, idx2, y = self.generate_pair_indices(
+                    batch_labels_gpu, num_samples_for_pairs
+                )
 
-                emb_gpu = torch.from_numpy(emb).to(self.device).to(torch.float32)  # cast back for criterion if needed
+                emb_gpu = (
+                    torch.from_numpy(emb).to(self.device).to(torch.float32)
+                )  # cast back for criterion if needed
                 e1 = emb_gpu.index_select(0, idx1)
                 e2 = emb_gpu.index_select(0, idx2)
                 loss = self.criterion(e1, e2, y)
                 running_loss += float(loss.item())
                 total_batches += 1
 
-                del e1, e2, idx1, idx2, y, emb_gpu, emb, batch_data, batch_labels, batch_labels_gpu
+                del (
+                    e1,
+                    e2,
+                    idx1,
+                    idx2,
+                    y,
+                    emb_gpu,
+                    emb,
+                    batch_data,
+                    batch_labels,
+                    batch_labels_gpu,
+                )
                 torch.cuda.empty_cache()
 
         self.log(
@@ -671,10 +712,9 @@ class RecurrenceExperiment(Experiment):
         )
 
         avg_loss = running_loss / max(1, total_batches)
-        y_pred  = torch.tensor(all_preds)
+        y_pred = torch.tensor(all_preds)
         y_label = torch.tensor(all_labels)
         return avg_loss, y_pred, y_label
-
 
     def test(self, model, trainloader, testloader):
         loss = 0.0
@@ -683,28 +723,24 @@ class RecurrenceExperiment(Experiment):
         self.criterion.eval()
 
         accuracy = MulticlassAccuracy(
-            num_classes=self.num_classes,
-              average=None #"macro"
+            num_classes=self.num_classes, average=None  # "macro"
         ).to(self.device)
 
         precision = MulticlassPrecision(
-            num_classes=self.num_classes, 
-            average="macro"
+            num_classes=self.num_classes, average="macro"
         ).to(self.device)
 
-        recall = MulticlassRecall(
-            num_classes=self.num_classes, 
-            average="macro"
-        ).to(self.device)
+        recall = MulticlassRecall(num_classes=self.num_classes, average="macro").to(
+            self.device
+        )
 
-        f1 = MulticlassF1Score(
-            num_classes=self.num_classes, 
-            average="macro"
-            ).to(self.device)
-        
-        conf_matrix = MulticlassConfusionMatrix(
-            num_classes=self.num_classes
-        ).to(self.device)
+        f1 = MulticlassF1Score(num_classes=self.num_classes, average="macro").to(
+            self.device
+        )
+
+        conf_matrix = MulticlassConfusionMatrix(num_classes=self.num_classes).to(
+            self.device
+        )
 
         loss, predicted, label = self.knn_in_embedding_space(
             model, trainloader, testloader
@@ -719,7 +755,7 @@ class RecurrenceExperiment(Experiment):
         f1.update(predicted, label)
         conf_matrix.update(predicted, label)
 
-        acc = accuracy.compute().mean().item()          # macro average manually
+        acc = accuracy.compute().mean().item()  # macro average manually
         acc_per_class = accuracy.compute().cpu().numpy().tolist()
         prec = precision.compute().item()
         rec = recall.compute().item()
@@ -728,6 +764,115 @@ class RecurrenceExperiment(Experiment):
 
         return float(loss), acc, acc_per_class, prec, rec, f1_score, conf
 
+    def log_s_vectors_with_prototypes(
+        self, model, loss_model, data_loader, n_pairs=100, pca_components=2
+    ):
+        model.eval()
+        vectors_s = []
+        markers = []
+
+        with torch.no_grad():
+            for batch_data, batch_labels in data_loader:
+                batch_data = batch_data.to(self.device)
+                batch_labels = batch_labels.to(self.device)
+
+                # ==== NEW: use generate_pair_indices ====
+                idx1, idx2, y_pairs = self.generate_pair_indices(
+                    batch_labels, N=100, allow_repeat=True
+                )
+
+                # If no pairs possible, skip this batch
+                if idx1.numel() == 0:
+                    continue
+
+                # Extract pairs from the batch
+                pairs_1 = batch_data[idx1]
+                pairs_2 = batch_data[idx2]
+
+                # Compute embeddings
+                emb1 = model(pairs_1.float()).cpu().numpy()
+                emb2 = model(pairs_2.float()).cpu().numpy()
+
+                # Compute s = |emb1 - emb2|
+                s_vec = np.abs(emb1 - emb2)
+
+                vectors_s.append(s_vec)
+                markers.append(y_pairs.cpu().numpy())
+
+                # Stop when we collected enough
+                if sum(len(v) for v in vectors_s) >= n_pairs:
+                    break
+
+        # ====== Final concatenation ======
+        if len(vectors_s) == 0:
+            self.log("No S vectors generated (empty pairs).", object_id=self.id)
+            return None
+
+        vectors_s = np.concatenate(vectors_s, axis=0)[:n_pairs]
+        markers = np.concatenate(markers, axis=0)[:n_pairs]
+
+        # ====== PCA ======
+        pca = PCA(n_components=pca_components)
+        vectors_s_2d = pca.fit_transform(vectors_s)
+
+        # Prototypes
+        sim_proto = loss_model.similar_prototypes.detach().cpu().numpy()
+        dissim_proto = loss_model.dissimilar_prototypes.detach().cpu().numpy()
+
+        sim_proto_2d = pca.transform(sim_proto)
+        dissim_proto_2d = pca.transform(dissim_proto)
+
+        # ====== Log ======
+        self.log(
+            f"\n===== S-VECTORS WITH PROTOTYPES =====\n"
+            f"CLIENT: {self.client_name}\n"
+            f"S_2D_SHAPE: {vectors_s_2d.shape}\n"
+            f"MARKERS_SHAPE: {markers.shape}\n"
+            f"SIM_PROTO_2D_SHAPE: {sim_proto_2d.shape}\n"
+            f"DISSIM_PROTO_2D_SHAPE: {dissim_proto_2d.shape}\n\n"
+            f"S_2D =\n{np.array2string(vectors_s_2d, separator=', ')}\n\n"
+            f"MARKERS =\n{np.array2string(markers, separator=', ')}\n\n"
+            f"SIMILAR_PROTOTYPES_2D =\n{np.array2string(sim_proto_2d, separator=', ')}\n\n"
+            f"DISSIMILAR_PROTOTYPES_2D =\n{np.array2string(dissim_proto_2d, separator=', ')}\n",
+            object_id=self.id,
+        )
+
+        return vectors_s_2d, markers, sim_proto_2d, dissim_proto_2d
+
+    def log_2d_embedding_space(self, model, data_loader, n_samples=1000):
+        model.eval()
+        embeddings = []
+        labels = []
+
+        with torch.no_grad():
+            for batch_data, batch_labels in data_loader:
+                batch_data = batch_data.to(self.device)
+                emb = model(batch_data.float()).cpu().numpy()
+
+                embeddings.append(emb)
+                labels.append(batch_labels.numpy())
+
+                if len(embeddings) * batch_data.size(0) >= n_samples:
+                    break
+
+        embeddings = np.concatenate(embeddings, axis=0)[:n_samples]
+        labels = np.concatenate(labels, axis=0)[:n_samples]
+
+        pca = PCA(n_components=2)
+        emb2d = pca.fit_transform(embeddings)
+
+        self.log(
+            f"\n===== EMBEDDING SPACE =====\n"
+            f"CLIENT: {self.client_name}\n"
+            f"EMB_2D_SHAPE: {emb2d.shape}\n"
+            f"LABELS_SHAPE: {labels.shape}\n\n"
+            f"EMBEDDINGS_2D =\n{np.array2string(emb2d, separator=', ')}\n\n"
+            f"LABELS =\n{np.array2string(labels, separator=', ')}\n",
+            object_id=self.id,
+        )
+
+        return emb2d, labels
+
     def validation_loop(self, data_loaders, alpha):
         support_loader, query_loader = data_loaders
 
@@ -735,11 +880,51 @@ class RecurrenceExperiment(Experiment):
         self.adapted_model = copy.deepcopy(self.model).to(self.device)
 
         if self.epoch_fl <= 5:
-            self.pre_train_model(self.adapted_model, support_loader, alpha=self.pre_train_lr, num_epochs=2)
+            self.pre_train_model(
+                self.adapted_model,
+                support_loader,
+                alpha=self.pre_train_lr,
+                num_epochs=2,
+            )
         elif self.epoch_fl <= 40:
-            self.train_model(self.adapted_model, support_loader, alpha=self.lr, num_epochs=2, only_markers=True)
+            self.train_model(
+                self.adapted_model,
+                support_loader,
+                alpha=self.lr,
+                num_epochs=2,
+                only_markers=True,
+            )
         else:
-            self.train_model(self.adapted_model, support_loader, alpha=self.lr, num_epochs=2, only_markers=False)
+            self.train_model(
+                self.adapted_model,
+                support_loader,
+                alpha=self.lr,
+                num_epochs=2,
+                only_markers=False,
+            )
+
+        try:
+            if self.client_name == 1 and (
+                self.epoch_fl == 1 or self.epoch_fl % 25 == 0
+            ):
+                self.log(
+                    f"{self.client_name} - Logging visualization data for embeddings and S-vectors",
+                    object_id=self.id,
+                )
+
+                # Log embeddings PCA
+                self.log_2d_embedding_space(self.adapted_model, support_loader)
+
+                # Log S-vectors + prototypes PCA
+                self.log_s_vectors_with_prototypes(
+                    self.adapted_model, self.criterion, support_loader
+                )
+
+        except Exception as e:
+            self.log(
+                f"{self.client_name} - Visualization logging failed: {str(e)}",
+                object_id=self.id,
+            )
 
         # ---- Evaluate adapted model on query set ----
         loss_avg, acc, acc_per_class, prec, rec, f1, conf = self.test(
@@ -747,7 +932,9 @@ class RecurrenceExperiment(Experiment):
         )
 
         # build per-class accuracy mapping
-        acc_per_class_dict = {f"TEST_ACC_CLASS_{i}": v for i, v in enumerate(acc_per_class)}
+        acc_per_class_dict = {
+            f"TEST_ACC_CLASS_{i}": v for i, v in enumerate(acc_per_class)
+        }
 
         torch.cuda.empty_cache()
 
@@ -756,7 +943,7 @@ class RecurrenceExperiment(Experiment):
             "TEST_PREC": prec,
             "Recall": rec,
             "TEST_F1": f1,
-            #**acc_per_class_dict  # add per-class metrics to the output dictionary
+            # **acc_per_class_dict  # add per-class metrics to the output dictionary
         }
 
     def evaluate(
