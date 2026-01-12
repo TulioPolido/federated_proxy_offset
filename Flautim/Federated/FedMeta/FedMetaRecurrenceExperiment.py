@@ -81,112 +81,112 @@ class RecurrenceExperiment(Experiment):
 
     def train_model(self, model, train_loader, alpha, num_epochs=1):
         """Train with minimal memory footprint."""
-        for _ in range(num_epochs):
-            total_loss, total_samples = 0.0, 0
+        for _ in range(num_epochs): # Para cada epoca
+            total_loss, total_samples = 0.0, 0 # Inicializa a loss total e samples total
 
-            for data, labels in train_loader:
-                data, labels = data.to(self.device), labels.to(self.device)
+            for data, labels in train_loader: # Para cada par de dados e labels no trainloader
+                data, labels = data.to(self.device), labels.to(self.device) # Passa os dados e labels para a GPU
 
                 # Mixed precision forward
-                with autocast(enabled=True):
-                    outputs = model(data)
-                    loss = self.criterion(outputs, labels)
+                with autocast(enabled=True): # Autocast seleciona de forma dinamica e automatica a precisao numerica
+                    outputs = model(data) # Passa os dados pelo modelo e guarda as saidas geradas
+                    loss = self.criterion(outputs, labels) # Utiliza entropia cruzada para calcular a loss
 
-                total_loss += loss.item() * labels.size(0)
-                total_samples += labels.size(0)
+                total_loss += loss.item() * labels.size(0) # Total Loss é somado à loss atual * a quantidade de labels
+                total_samples += labels.size(0) # Samples total é somado à quantidade de labels
 
-                grads = torch.autograd.grad(loss, list(model.parameters()), create_graph=False)
+                grads = torch.autograd.grad(loss, list(model.parameters()), create_graph=False) # Calcula o gradiente da loss em relação aos parametros do modelo
 
                 # Update parameters without tracking gradients
-                with torch.no_grad():
-                    for param, grad_ in zip(model.parameters(), grads):
-                        if grad_ is not None:
-                            param -= alpha * grad_
+                with torch.no_grad(): # Ignora os gradientes no bloco
+                    for param, grad_ in zip(model.parameters(), grads): # Para cada par parametro-gradiente
+                        if grad_ is not None: # Se o gradiente é não nulo
+                            param -= alpha * grad_ # Subtrai-se do parametro o gradiente respectivo * uma constante alpha
 
                 # Clear tensors to avoid graph accumulation
-                del grads, outputs, data, labels, loss
-                torch.cuda.empty_cache()
+                del grads, outputs, data, labels, loss # deleta variáveis para economizar espaço
+                torch.cuda.empty_cache() # Esvazia a cache da GPU
 
-            torch.cuda.synchronize()
+            torch.cuda.synchronize() # forca a CPU a aguardar as operacoes CUDA ao fim da época
 
-        return total_loss / total_samples
+        return total_loss / total_samples # Retorna o valor de loss média
 
 
     def compute_query_loss(self, model, query_loader):
         """Compute gradients for query set with minimal GPU memory usage."""
-        model.eval()
-        grads_sum = [torch.zeros_like(p, device="cpu") for p in model.parameters()]
-        total_samples = 0
+        model.eval() # Altera o modo do modelo para avaliação 
+        grads_sum = [torch.zeros_like(p, device="cpu") for p in model.parameters()] # Inicializa o vetor de somatorio de gradientes no formato do vetores de parametros
+        total_samples = 0 # Inicializa samples totais
 
-        for data, labels in query_loader:
-            data, labels = data.to(self.device), labels.to(self.device)
-            batch_size = labels.size(0)
-            total_samples += batch_size
+        for data, labels in query_loader: # Para cada par dado-label no quaryloader
+            data, labels = data.to(self.device), labels.to(self.device) # Carrega os dados e labels na GPU
+            batch_size = labels.size(0) # Inicializa o tamanho do batch
+            total_samples += batch_size # Soma o tamanho do batch ao total de samples
 
             # Use mixed precision for memory efficiency
-            with torch.cuda.amp.autocast(enabled=True):
-                outputs = model(data)
-                loss = self.criterion(outputs, labels)
+            with torch.cuda.amp.autocast(enabled=True): # Aplica precisao numérica automática
+                outputs = model(data) # Envia os dados para o modelo e salva a saída
+                loss = self.criterion(outputs, labels) # Calcula a perda com entropia cruzada
 
             # Compute per-batch grads, without graph
-            grads = torch.autograd.grad(loss, list(model.parameters()), create_graph=False)
+            grads = torch.autograd.grad(loss, list(model.parameters()), create_graph=False) # Computa os gradientes da loss em relação aos parametros do modelo
 
             # Accumulate grads safely on CPU
-            for i, g in enumerate(grads):
-                if g is not None:
-                    grads_sum[i] += g.detach().cpu() * batch_size
+            for i, g in enumerate(grads): # Para cada par índice-gradiente na lista de gradientes
+                if g is not None: # Se o gradiente não é nulo
+                    grads_sum[i] += g.detach().cpu() * batch_size # Soma na posição do índice em grads_sum o gradiente multiplicado pelo batch_size
 
-            del outputs, loss, grads, data, labels
-            torch.cuda.empty_cache()
+            del outputs, loss, grads, data, labels # Apaga variáveis para economizar memória
+            torch.cuda.empty_cache() # Limpa cache da GPU
 
         # Average grads across all samples
-        avg_grads = [g / total_samples for g in grads_sum]
+        avg_grads = [g / total_samples for g in grads_sum] # Calcula o gradiente médio em cada posição da lista grads_sum
 
         # Convert to numpy for Flower
-        grads_np = [g.numpy() for g in avg_grads]
+        grads_np = [g.numpy() for g in avg_grads] # Converte os gradiente médios para numpy
 
-        del grads_sum, avg_grads
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
+        del grads_sum, avg_grads # Apaga variáveis para economizar memória
+        torch.cuda.empty_cache() # Limpa cache da GPU
+        torch.cuda.synchronize() # forca a CPU a aguardar as operacoes CUDA
 
-        return grads_np
+        return grads_np # retorna os gradientes como numpy
 
 
     def fit(self, parameters: NDArrays, config: Dict[str, Scalar]) -> Tuple[NDArrays, int, Dict]:
         
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize()
+            torch.cuda.empty_cache() # Limpa cache da GPU
+            torch.cuda.synchronize() # Força CPU a aguardar operações CUDA
 
             self.log(f"{self.client_name} - FedMeta client training started", details="", object="", object_id=self.id)
             self.epoch_fl = config["server_round"]
 
             # === Load global model ===
-            self.model.set_parameters(parameters)
+            self.model.set_parameters(parameters) # Salva os parâmetros recebidos no modelo
 
             # === Clear any old adapted model ===
-            if hasattr(self, "adapted_model"):
-                del self.adapted_model
-                torch.cuda.empty_cache()
-                gc.collect()
+            if hasattr(self, "adapted_model"): # Se existir modelo adaptado
+                del self.adapted_model # Apaga o modelo adaptado
+                torch.cuda.empty_cache() # Limpa a cache da GPU
+                gc.collect() # Força coleta de lixo
 
             # === Reload dataloaders ===
-            support_loader, query_loader = self.dataset.dataloader(validation=False)
-            total_len = len(support_loader.dataset) + len(query_loader.dataset)
+            support_loader, query_loader = self.dataset.dataloader(validation=False) # Recebe os dados de treino e teste
+            total_len = len(support_loader.dataset) + len(query_loader.dataset) # Salva o tamanho total dos dados somados
 
             # === Create fresh model for adaptation ===
-            self.adapted_model = copy.deepcopy(self.model).to(self.device)
+            self.adapted_model = copy.deepcopy(self.model).to(self.device) # Cria um modelo adaptado (uma cópia do modelo atual)
 
-            loss = self.train_model(self.adapted_model, support_loader, self.lr, self.epochs)
+            loss = self.train_model(self.adapted_model, support_loader, self.lr, self.epochs) # Treina o modelo adaptado com dados de treinamento
 
-            grads = self.compute_query_loss(self.adapted_model, query_loader)
+            grads = self.compute_query_loss(self.adapted_model, query_loader) # Calcula o gradiente do modelo adaptado com os dados de teste
 
-            file_path = f"gradients_{self.client_name}.npz"
-            np.savez(file_path, *grads)
+            file_path = f"gradients_{self.client_name}.npz" # Cria um nome para o arquivo de gradientes
+            np.savez(file_path, *grads) # Salva os gradientes desse cliente no arquivo
 
             # Free adapted model after training
-            del self.adapted_model, grads
-            torch.cuda.empty_cache()
-            gc.collect()
+            del self.adapted_model, grads # Deleta o modelo adaptado e os gradientes
+            torch.cuda.empty_cache() # Limpa a cache da GPU
+            gc.collect() # Força coleta de lixo
 
             self.log(
                 f"{self.client_name} - FedMeta client finished",
@@ -199,7 +199,7 @@ class RecurrenceExperiment(Experiment):
                 self.model.get_parameters(),
                 total_len,
                 {"loss": loss, "grads_file": self.client_name},
-            )
+            ) # Retorna os parâmetros originais do modelo, o tamanho total dos dados, a loss e o nome do arquivo de gradientes
 
 
     ################################

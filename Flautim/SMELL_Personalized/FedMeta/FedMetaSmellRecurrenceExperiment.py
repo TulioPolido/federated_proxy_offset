@@ -511,8 +511,8 @@ class RecurrenceExperiment(Experiment):
         return total_loss / max(1, total_samples)
 
     def compute_query_loss(self, model, query_loader, num_samples_for_pairs=200):
-        model.eval()
-        self.criterion.eval()
+        model.train()
+        self.criterion.train()
         grads_sum = [torch.zeros_like(p, device="cpu") for p in model.parameters()]
         total_samples = 0
 
@@ -522,13 +522,12 @@ class RecurrenceExperiment(Experiment):
             batch_size = batch_labels.size(0)
             total_samples += batch_size
 
-            idx1, idx2, y = self.generate_pair_indices(
-                batch_labels, num_samples_for_pairs
-            )
             with autocast(enabled=True):
-                embeddings = model(batch_data)  # [B, D]
-                e1 = embeddings.index_select(0, idx1)
-                e2 = embeddings.index_select(0, idx2)
+                idx1, idx2, y = self.generate_pair_indices(
+                    batch_labels, N=num_samples_for_pairs
+                )
+                e1 = model(batch_data[idx1])
+                e2 = model(batch_data[idx2])
                 loss = self.criterion(e1, e2, y)
 
             grads = torch.autograd.grad(
@@ -539,7 +538,7 @@ class RecurrenceExperiment(Experiment):
                 if g is not None:
                     grads_sum[i] += g.detach().cpu() * batch_size
 
-            del embeddings, e1, e2, idx1, idx2, y, loss, grads, batch_data, batch_labels
+            del e1, e2, idx1, idx2, y, loss, grads, batch_data, batch_labels
             torch.cuda.empty_cache()
 
         avg_grads = [g / total_samples for g in grads_sum]
@@ -566,9 +565,9 @@ class RecurrenceExperiment(Experiment):
         # === Load prototypes ===
         prots_file_path = f"prototypes_{self.client_name}.npz"
 
-        if os.path.exists(prots_file_path):
-            state = torch.load(prots_file_path, map_location=self.device)
-            self.criterion.load_state_dict(state)
+        # if os.path.exists(prots_file_path):
+        #     state = torch.load(prots_file_path, map_location=self.device)
+        #     self.criterion.load_state_dict(state)
 
         # === Load global model ===
         self.model.set_parameters(parameters)
@@ -593,7 +592,7 @@ class RecurrenceExperiment(Experiment):
                 alpha=self.pre_train_lr,
                 num_epochs=self.num_epochs,
             )
-        elif self.epoch_fl <= 40:
+        elif self.epoch_fl <= 10:
             loss = self.train_model(
                 self.adapted_model,
                 support_loader,
@@ -667,28 +666,27 @@ class RecurrenceExperiment(Experiment):
 
         with torch.inference_mode():
             for batch_data, batch_labels in test_loader:
-                batch_data = batch_data.to(self.device, non_blocking=True).float()
-                emb = model(batch_data).detach().cpu().to(torch.float16).numpy()
-                preds = knn.predict(emb)
+                batch_data = batch_data.to(self.device).float()
+
+                # compute embeddings on GPU once
+                emb_gpu = model(batch_data)  # [B, D]
+                emb_cpu = emb_gpu.detach().cpu().to(torch.float16)  # for KNN
+
+                preds = knn.predict(emb_cpu.numpy())
                 all_preds.extend(preds)
                 all_labels.extend(batch_labels.numpy())
 
-                # compute pair loss on embeddings (no extra forwards)
-                # build pairs on GPU cheaply
-                batch_labels_gpu = torch.from_numpy(batch_labels.numpy()).to(
-                    self.device
-                )
+                # build pairs on GPU
                 idx1, idx2, y = self.generate_pair_indices(
-                    batch_labels_gpu, num_samples_for_pairs
+                    batch_labels.to(self.device), num_samples_for_pairs
                 )
 
-                emb_gpu = (
-                    torch.from_numpy(emb).to(self.device).to(torch.float32)
-                )  # cast back for criterion if needed
-                e1 = emb_gpu.index_select(0, idx1)
-                e2 = emb_gpu.index_select(0, idx2)
+                # match train style: direct indexing, no index_select
+                e1 = emb_gpu[idx1]
+                e2 = emb_gpu[idx2]
                 loss = self.criterion(e1, e2, y)
-                running_loss += float(loss.item())
+
+                running_loss += loss.item()
                 total_batches += 1
 
                 del (
@@ -698,10 +696,9 @@ class RecurrenceExperiment(Experiment):
                     idx2,
                     y,
                     emb_gpu,
-                    emb,
+                    emb_cpu,
                     batch_data,
                     batch_labels,
-                    batch_labels_gpu,
                 )
                 torch.cuda.empty_cache()
 
@@ -720,7 +717,7 @@ class RecurrenceExperiment(Experiment):
         loss = 0.0
         model.to(self.device)
         model.eval()
-        self.criterion.eval()
+        self.criterion.train()
 
         accuracy = MulticlassAccuracy(
             num_classes=self.num_classes, average=None  # "macro"
@@ -904,7 +901,7 @@ class RecurrenceExperiment(Experiment):
             )
 
         try:
-            if self.client_name == 1 and (
+            if self.client_name == 0 and (
                 self.epoch_fl == 1 or self.epoch_fl % 25 == 0
             ):
                 self.log(
@@ -918,6 +915,11 @@ class RecurrenceExperiment(Experiment):
                 # Log S-vectors + prototypes PCA
                 self.log_s_vectors_with_prototypes(
                     self.adapted_model, self.criterion, support_loader
+                )
+            else:
+                self.log(
+                    f"{self.client_name} - No Logging visualization",
+                    object_id=self.id,
                 )
 
         except Exception as e:

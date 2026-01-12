@@ -40,25 +40,18 @@ EMB_DIM = 64
 ######################################
 
 
-def update_ema(
-    prev_ema: float,
-    current_value: float,
-    smoothing_weight: float,
-) -> float:
-    if prev_ema is None:
-        return current_value
-    return (1 - smoothing_weight) * current_value + smoothing_weight * prev_ema
-
-
 def tensor_summary(name: str, tensor: torch.Tensor):
     """Return a compact summary of a tensor for logging."""
     if tensor is None:
         return f"{name}: None"
-    return (f"{name}: shape={tuple(tensor.shape)}, "
-            f"mean={tensor.mean().item():.6f}, "
-            f"std={tensor.std().item():.6f}, "
-            f"min={tensor.min().item():.6f}, "
-            f"max={tensor.max().item():.6f}")
+    return (
+        f"{name}: shape={tuple(tensor.shape)}, "
+        f"mean={tensor.mean().item():.6f}, "
+        f"std={tensor.std().item():.6f}, "
+        f"min={tensor.min().item():.6f}, "
+        f"max={tensor.max().item():.6f}"
+    )
+
 
 def fedmeta_update_maml(
     net: torch.nn.Module,
@@ -67,11 +60,11 @@ def fedmeta_update_maml(
     gradients_aggregated: NDArrays,
     weight_decay: float,
 ) -> NDArrays:
-    
+
     params_dict = zip(net.state_dict().keys(), weights_results)
     state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
     net.load_state_dict(state_dict, strict=True)
-    
+
     optimizer = torch.optim.Adam(
         list(net.parameters()), lr=beta, weight_decay=weight_decay
     )
@@ -146,7 +139,7 @@ class FedMeta(flwr.server.strategy.FedAvg):
             grads_file = fit_res.metrics.get("grads_file")
             if grads_file is None:
                 raise ValueError("No grads_file in metrics for a client!")
-            
+
             # Load the .npz file
             log(INFO, f"Reading file for: {grads_file}")
             file_path = f"gradients_{grads_file}.npz"
@@ -346,7 +339,7 @@ if __name__ == "__main__":
             LEARNING_RATE_GAMMA = 0.8
             WEIGHT_DECAY = 6.7e-5
             FRACTION_FIT = 0.5
-            FRACTION_EVALUATE = 1.0
+            FRACTION_EVALUATE = 0.5
             AUGMENTATION = 2
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
