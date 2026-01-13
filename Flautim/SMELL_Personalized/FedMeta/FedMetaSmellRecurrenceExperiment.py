@@ -466,15 +466,20 @@ class RecurrenceExperiment(Experiment):
 
         return running_loss / max(1, len(dataloader))
 
-    def train_model(self, model, train_loader, alpha, num_epochs=1, only_markers=False):
+    def train_model(
+        self, model, train_loader, alpha, num_epochs=1, only_markers=False, beta=0.9
+    ):
         model.train()
-        self.criterion.train()  # criterion has learnable params
+        self.criterion.toggle_requires_grad(requires_grad_value=True)
 
         # Choose params based on flag
         if only_markers:
             train_params = list(self.criterion.parameters())
         else:
             train_params = list(model.parameters()) + list(self.criterion.parameters())
+
+        # Initialize momentum buffers
+        vel = [torch.zeros_like(p) for p in train_params]
 
         for epoch in range(num_epochs):
             total_loss, total_samples = 0.0, 0
@@ -499,9 +504,17 @@ class RecurrenceExperiment(Experiment):
 
                 # Manual SGD step
                 with torch.no_grad():
-                    for param, grad_ in zip(train_params, grads):
+                    for i, (param, grad_) in enumerate(zip(train_params, grads)):
                         if grad_ is not None:
-                            param -= alpha * grad_
+                            # v_t = β v_{t-1} + g_t
+                            new_v = beta * vel[i] + grad_
+
+                            # p = p − α v_t
+                            new_p = param - alpha * new_v
+
+                            # Commit the updates
+                            vel[i].copy_(new_v)
+                            param.copy_(new_p)
 
                 del e1, e2, idx1, idx2, y, grads, batch_data, batch_labels, loss
                 torch.cuda.empty_cache()
@@ -511,28 +524,38 @@ class RecurrenceExperiment(Experiment):
         return total_loss / max(1, total_samples)
 
     def compute_query_loss(self, model, query_loader, num_samples_for_pairs=200):
-        model.train()
-        self.criterion.train()
+        model.eval()
         grads_sum = [torch.zeros_like(p, device="cpu") for p in model.parameters()]
         total_samples = 0
 
         for batch_data, batch_labels in query_loader:
-            batch_data = batch_data.to(self.device, non_blocking=True).float()
-            batch_labels = batch_labels.to(self.device, non_blocking=True)
-            batch_size = batch_labels.size(0)
-            total_samples += batch_size
+            # batch_data = batch_data.to(self.device, non_blocking=True).float()
+            # batch_labels = batch_labels.to(self.device, non_blocking=True)
+            # batch_size = batch_labels.size(0)
+            # total_samples += batch_size
+            batch_data, batch_labels = batch_data.to(self.device), batch_labels.to(
+                self.device
+            )  # Carrega os dados e labels na GPU
+            batch_size = batch_labels.size(0)  # Inicializa o tamanho do batch
+            total_samples += batch_size  # Soma o tamanho do batch ao total de samples
 
             with autocast(enabled=True):
                 idx1, idx2, y = self.generate_pair_indices(
                     batch_labels, N=num_samples_for_pairs
-                )
-                e1 = model(batch_data[idx1])
-                e2 = model(batch_data[idx2])
-                loss = self.criterion(e1, e2, y)
+                )  # Gera pares similares/dissimilares e retorna seus índices e label
+                e1 = model(
+                    batch_data[idx1]
+                )  # Manda os dados do índice 1 para o modelo e guarda os embeddings
+                e2 = model(
+                    batch_data[idx2]
+                )  # Manda os dados do índice 2 para o modelo e guarda os embeddings
+                loss = self.criterion(
+                    e1, e2, y
+                )  # Calcula a entropia cruzada binária para pares similares/dissimilares
 
             grads = torch.autograd.grad(
                 loss, list(model.parameters()), create_graph=False
-            )
+            )  # Calcula os gradientes do modelo recebido
 
             for i, g in enumerate(grads):
                 if g is not None:
@@ -562,8 +585,8 @@ class RecurrenceExperiment(Experiment):
         )
         self.epoch_fl = config["server_round"]
 
-        # === Load prototypes ===
-        prots_file_path = f"prototypes_{self.client_name}.npz"
+        # # === Load prototypes ===
+        # prots_file_path = f"prototypes_{self.client_name}.npz"
 
         # if os.path.exists(prots_file_path):
         #     state = torch.load(prots_file_path, map_location=self.device)
@@ -610,7 +633,7 @@ class RecurrenceExperiment(Experiment):
             )
 
         # Save prototypes
-        torch.save(self.criterion.state_dict(), prots_file_path)
+        # torch.save(self.criterion.state_dict(), prots_file_path)
 
         # === Outer loop: compute query loss on adapted model ===
         grads = self.compute_query_loss(self.adapted_model, query_loader)
