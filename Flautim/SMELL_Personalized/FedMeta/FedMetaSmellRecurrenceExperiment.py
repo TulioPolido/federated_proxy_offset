@@ -466,20 +466,15 @@ class RecurrenceExperiment(Experiment):
 
         return running_loss / max(1, len(dataloader))
 
-    def train_model(
-        self, model, train_loader, alpha, num_epochs=1, only_markers=False, beta=0.9
-    ):
+    def train_model(self, model, train_loader, alpha, num_epochs=1, only_markers=False):
         model.train()
-        self.criterion.toggle_requires_grad(requires_grad_value=True)
+        self.criterion.train()  # criterion has learnable params
 
         # Choose params based on flag
         if only_markers:
             train_params = list(self.criterion.parameters())
         else:
             train_params = list(model.parameters()) + list(self.criterion.parameters())
-
-        # Initialize momentum buffers
-        vel = [torch.zeros_like(p) for p in train_params]
 
         for epoch in range(num_epochs):
             total_loss, total_samples = 0.0, 0
@@ -504,17 +499,9 @@ class RecurrenceExperiment(Experiment):
 
                 # Manual SGD step
                 with torch.no_grad():
-                    for i, (param, grad_) in enumerate(zip(train_params, grads)):
+                    for param, grad_ in zip(train_params, grads):
                         if grad_ is not None:
-                            # v_t = β v_{t-1} + g_t
-                            new_v = beta * vel[i] + grad_
-
-                            # p = p − α v_t
-                            new_p = param - alpha * new_v
-
-                            # Commit the updates
-                            vel[i].copy_(new_v)
-                            param.copy_(new_p)
+                            param -= alpha * grad_
 
                 del e1, e2, idx1, idx2, y, grads, batch_data, batch_labels, loss
                 torch.cuda.empty_cache()
@@ -524,7 +511,8 @@ class RecurrenceExperiment(Experiment):
         return total_loss / max(1, total_samples)
 
     def compute_query_loss(self, model, query_loader, num_samples_for_pairs=200):
-        model.eval()
+        model.train()
+        self.criterion.eval()
         grads_sum = [torch.zeros_like(p, device="cpu") for p in model.parameters()]
         total_samples = 0
 

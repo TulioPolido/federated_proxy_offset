@@ -23,70 +23,73 @@ def fit_config(server_round):
 
 def generate_server_fn(context, eval_fn=None):
     def create_server_fn(context_flwr):
+       
+            net = SmellRecurrenceModel.RecurrenceModel(
+                context, emb_dim=EMB_DIM, num_channels=NUM_CHANNELS, suffix=0
+            )
+            params = ndarrays_to_parameters(net.get_parameters())
 
-        net = SmellRecurrenceModel.RecurrenceModel(
-            context, emb_dim=EMB_DIM, num_channels=NUM_CHANNELS, suffix=0
-        )
-        params = ndarrays_to_parameters(net.get_parameters())
+            strategy = flwr.server.strategy.FedAvg(
+                initial_parameters=params,
+                evaluate_metrics_aggregation_fn=weighted_average,
+                fraction_fit=0.5,
+                fraction_evaluate=1.0,
+                evaluate_fn=eval_fn,
+                on_fit_config_fn=fit_config,
+                on_evaluate_config_fn=fit_config,
+            )
 
-        strategy = flwr.server.strategy.FedAvg(
-            initial_parameters=params,
-            evaluate_metrics_aggregation_fn=weighted_average,
-            fraction_fit=FRACTION_FIT,
-            fraction_evaluate=FRACTION_EVALUATE,
-            evaluate_fn=eval_fn,
-            on_fit_config_fn=fit_config,
-            on_evaluate_config_fn=fit_config,
-        )
-
-        config = ServerConfig(num_rounds=NUM_ROUNDS)
-        return ServerAppComponents(config=config, strategy=strategy)
+            config = ServerConfig(num_rounds=NUM_ROUNDS)
+            return ServerAppComponents(config=config, strategy=strategy)
+        
 
     return create_server_fn
 
 
 def generate_client_fn(context, files, test_file):
     def create_client_fn(context_flwr):
+      
+            cid = int(context_flwr.node_config["partition-id"])
+            file = files[cid]
 
-        cid = int(context_flwr.node_config["partition-id"])
-        file = files[cid]
+            model = SmellRecurrenceModel.RecurrenceModel(
+                context, emb_dim=EMB_DIM, num_channels=NUM_CHANNELS, suffix=cid
+            )
 
-        model = SmellRecurrenceModel.RecurrenceModel(
-            context, emb_dim=EMB_DIM, num_channels=NUM_CHANNELS, suffix=cid
-        )
+            dataset = SmellRecurrenceDataset.RecurrenceDataset(
+                train_file=file,
+                test_file=test_file,
+                augment_multiplier=2,
+                use_crop=False,
+                use_erase=False,
+                use_jitter=False,
+                use_rotation=True
+            )
 
-        dataset = SmellRecurrenceDataset.RecurrenceDataset(
-            train_file=file,
-            test_file=test_file,
-            augment_multiplier=AUGMENT,
-            use_crop=False,
-            use_erase=False,
-            use_jitter=False,
-            use_rotation=True,
-        )
+            return SmellRecurrenceExperiment.RecurrenceExperiment(
+                model,
+                dataset,
+                context,
+                lr=LEARNING_RATE,
+                pre_train_lr=PRE_TRAIN_LEARNING_RATE,
+                epochs=NUM_EPOCHS,
+                weight_decay=WEIGHT_DECAY,
+                lr_step=LEARNING_RATE_STEP,
+                lr_gamma=LEARNING_RATE_GAMMA,
+                embedding_size=EMB_DIM
+                # pre_train=True
+            ).to_client()
 
-        return SmellRecurrenceExperiment.RecurrenceExperiment(
-            model,
-            dataset,
-            context,
-            lr=LEARNING_RATE,
-            pre_train_lr=PRE_TRAIN_LEARNING_RATE,
-            epochs=NUM_EPOCHS,
-            weight_decay=WEIGHT_DECAY,
-            lr_step=LEARNING_RATE_STEP,
-            lr_gamma=LEARNING_RATE_GAMMA,
-            embedding_size=EMB_DIM,
-            # pre_train=True
-        ).to_client()
 
     return create_client_fn
 
 
 def evaluate_fn(context, test_data):
-    def fn(server_round, parameters, config):
+     def fn(server_round, parameters, config):
         pass
 
-    return fn
+
+     return fn
 
 
 if __name__ == "__main__":
@@ -110,9 +113,6 @@ if __name__ == "__main__":
             LEARNING_RATE_STEP = 3
             LEARNING_RATE_GAMMA = 0.5
             WEIGHT_DECAY = 6.7e-5
-            AUGMENT = 2
-            FRACTION_FIT = 0.5
-            FRACTION_EVALUATE = 0.5
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
@@ -148,19 +148,16 @@ if __name__ == "__main__":
             NUM_CLASSES = 5
             WINDOW_SIZE = 256
             STRIDE = 64
-            PRE_TRAIN_LEARNING_RATE = 1e-4
+            PRE_TRAIN_LEARNING_RATE = 5e-5
             LEARNING_RATE = 1e-5
             LEARNING_RATE_STEP = 3
             LEARNING_RATE_GAMMA = 0.5
             WEIGHT_DECAY = 1.1e-5
-            AUGMENT = 0
-            FRACTION_FIT = 0.1
-            FRACTION_EVALUATE = 0.5
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
             # Shuffle and split
-            test_files = random.sample(all_files, TEST_USERS)
+            test_files = [random.sample(all_files, TEST_USERS)]
             train_files = [f for f in all_files if f not in test_files]
             fl.log(f"Train users: {train_files}")
             fl.log(f"Test users: {test_files}")
@@ -188,7 +185,7 @@ if __name__ == "__main__":
 
         client_fn_callback = generate_client_fn(context, files, combined_test_data)
         evaluate_fn_callback = evaluate_fn(context, combined_test_data)
-        server_fn_callback = generate_server_fn(context, eval_fn=None)
+        server_fn_callback = generate_server_fn(context, eval_fn=None) 
 
         # Run federated learning
         run_federated(

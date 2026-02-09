@@ -65,33 +65,6 @@ class FedMeta(flwr.server.strategy.FedAvg):
         self.net = model
         self.beta = lr_outer
         self.alpha = lr_inner
-        # self.alpha = torch.nn.ParameterList(
-        #     [
-        #         torch.nn.Parameter(torch.full_like(p, lr_inner))
-        #         for p in self.net.parameters()
-        #     ]
-        # )
-
-    # def configure_fit(
-    #     self, server_round: int, parameters: Parameters, client_manager: ClientManager
-    # ) -> List[Tuple[ClientProxy, FitIns]]:
-    #     """Configure the next round of training."""
-    #     if self.on_fit_config_fn is not None:
-    #         # Custom fit config function provided
-    #         config = self.on_fit_config_fn(server_round)
-    #     config["alpha"] = self.alpha
-    #     fit_ins = FitIns(parameters, config)
-
-    #     # Sample clients
-    #     sample_size, min_num_clients = self.num_fit_clients(
-    #         client_manager.num_available()
-    #     )
-    #     clients = client_manager.sample(
-    #         num_clients=sample_size, min_num_clients=min_num_clients
-    #     )
-
-    #     # Return client/config pairs
-    #     return [(client, fit_ins) for client in clients]
 
     def aggregate_fit(self, server_round, results, failures):
         for failure in failures:
@@ -140,10 +113,6 @@ class FedMeta(flwr.server.strategy.FedAvg):
             weight_decay=1e-4,
         )
         parameters_aggregated = ndarrays_to_parameters(weights_prime)
-
-        # log(INFO, "[FedMeta] Aggregated parameters summary:")
-        # for i, w in enumerate(weights_prime[:10]):  # print only first 10
-        #     log(INFO, f"  Param[{i}] shape={w.shape}, mean={np.mean(w):.6f}, std={np.std(w):.6f}")
 
         # Metrics
         metrics_aggregated = {}

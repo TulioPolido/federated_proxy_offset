@@ -58,26 +58,31 @@ def fedmeta_update_maml(
     beta: float,
     weights_results: NDArrays,
     gradients_aggregated: NDArrays,
-    weight_decay: float,
 ) -> NDArrays:
 
-    params_dict = zip(net.state_dict().keys(), weights_results)
-    state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
+    # Load global weights θ
+    state_dict = OrderedDict(
+        {k: torch.tensor(v) for k, v in zip(net.state_dict().keys(), weights_results)}
+    )
     net.load_state_dict(state_dict, strict=True)
+    before = [p.clone() for p in net.parameters()]
 
-    optimizer = torch.optim.Adam(
-        list(net.parameters()), lr=beta, weight_decay=weight_decay
+    # ---- MANUAL META UPDATE (SGD) ----
+    with torch.no_grad():
+        for param, grad in zip(net.parameters(), gradients_aggregated):
+            assert param.shape == torch.tensor(grad).shape
+            param -= beta * torch.tensor(grad, device=param.device)
+
+    i = 0
+    log(
+        INFO,
+        f"Before: {before[i].view(-1)[:5]} \
+        \nGrad: {gradients_aggregated[i].reshape(-1)[:5]} \
+        \nAfter: {net.parameters().__iter__().__next__().view(-1)[:5]}",
     )
 
-    # ---- ASSIGN GRADS ----
-    for (name, param), grad_ins in zip(net.named_parameters(), gradients_aggregated):
-        param.grad = torch.tensor(grad_ins, dtype=param.dtype)
-
-    # ---- OPTIMIZER STEP ----
-    optimizer.step()
-    optimizer.zero_grad()
-
-    weights_prime = [val.cpu().numpy() for _, val in net.state_dict().items()]
+    # Return updated weights
+    weights_prime = [p.cpu().numpy() for p in net.state_dict().values()]
     return weights_prime
 
 
@@ -161,7 +166,6 @@ class FedMeta(flwr.server.strategy.FedAvg):
             beta=self.beta,
             weights_results=weights_results[0][0],
             gradients_aggregated=gradients_aggregated,
-            weight_decay=1e-4,
         )
         parameters_aggregated = ndarrays_to_parameters(weights_prime)
 
