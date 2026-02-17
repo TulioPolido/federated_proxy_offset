@@ -4,7 +4,13 @@ import torch.nn.functional as F
 import random
 import torch.nn as nn
 from torch.optim.lr_scheduler import StepLR
-from torchmetrics.classification import MulticlassAccuracy, MulticlassPrecision, MulticlassRecall, MulticlassF1Score, MulticlassConfusionMatrix
+from torchmetrics.classification import (
+    MulticlassAccuracy,
+    MulticlassPrecision,
+    MulticlassRecall,
+    MulticlassF1Score,
+    MulticlassConfusionMatrix,
+)
 from sklearn.neighbors import KNeighborsClassifier
 import flautim as fl
 
@@ -29,8 +35,7 @@ class PrototypicalCenterLoss(nn.Module):
 
         # Initialize class prototypes (centers) as learnable parameters
         self.prototypes = nn.Parameter(
-            torch.randn(num_classes, embedding_size),
-            requires_grad=True
+            torch.randn(num_classes, embedding_size), requires_grad=True
         )  # create a parameter tensor of shape (num_classes, embedding_size)
         # The function is to make each 'prototype' as a possible center of one class
 
@@ -52,7 +57,10 @@ class PrototypicalCenterLoss(nn.Module):
 
         # Optionally, add inter-class loss (encourage prototypes to be apart)
         inter_class_distances = torch.cdist(self.prototypes, self.prototypes)
-        inter_class_distances = inter_class_distances + torch.eye(self.num_classes, device=embeddings.device) * 1e12  # Prevent self-comparison
+        inter_class_distances = (
+            inter_class_distances
+            + torch.eye(self.num_classes, device=embeddings.device) * 1e12
+        )  # Prevent self-comparison
 
         # Apply margin: penalize if prototypes are closer than the margin
         loss_inter = torch.mean(F.relu(self.margin - inter_class_distances))
@@ -62,7 +70,14 @@ class PrototypicalCenterLoss(nn.Module):
 
 
 class LearnablePrototypicalLossWithDiversityRegularization(nn.Module):
-    def __init__(self, embedding_dim, num_similar_prototypes, num_dissimilar_prototypes, margin=1.0, lambda_reg=0.01):
+    def __init__(
+        self,
+        embedding_dim,
+        num_similar_prototypes,
+        num_dissimilar_prototypes,
+        margin=1.0,
+        lambda_reg=0.01,
+    ):
         """
         Initialize the Prototypical Loss function with diversity regularization.
         paper : A New Similarity Space Tailored for Supervised Deep Metric Learning
@@ -80,17 +95,17 @@ class LearnablePrototypicalLossWithDiversityRegularization(nn.Module):
             torch.cat(
                 (
                     torch.zeros(1, embedding_dim),
-                    torch.randn(num_similar_prototypes-1, embedding_dim)
+                    torch.randn(num_similar_prototypes - 1, embedding_dim),
                 ),
-                dim=0
+                dim=0,
             ),
-            requires_grad=True
+            requires_grad=True,
         )
 
         # starts the dissimilar prototypes as all random + 2.0
         self.dissimilar_prototypes = nn.Parameter(
             torch.randn(num_dissimilar_prototypes, embedding_dim) + 2.0,
-            requires_grad=True
+            requires_grad=True,
         )
         self.margin = margin
         self.lambda_reg = lambda_reg
@@ -102,8 +117,12 @@ class LearnablePrototypicalLossWithDiversityRegularization(nn.Module):
         # Detach the tensor first to prevent in-place modification errors
         with torch.no_grad():
             # Set the requires_grad for a specific vector at index
-            self.similar_prototypes.data[index] = self.similar_prototypes.data[index].requires_grad_(requires_grad_value)
-            self.dissimilar_prototypes.data[index] = self.dissimilar_prototypes.data[index].requires_grad_(requires_grad_value)
+            self.similar_prototypes.data[index] = self.similar_prototypes.data[
+                index
+            ].requires_grad_(requires_grad_value)
+            self.dissimilar_prototypes.data[index] = self.dissimilar_prototypes.data[
+                index
+            ].requires_grad_(requires_grad_value)
 
     def diversity_regularization(self, prototypes):
         """
@@ -135,27 +154,39 @@ class LearnablePrototypicalLossWithDiversityRegularization(nn.Module):
         s_ij = s_ij.unsqueeze(1)  # Shape: [batch_size, 1, embedding_dim]
 
         # Compute distances to all similar prototypes
-        dist_to_similar_prototypes = torch.cdist(s_ij, self.similar_prototypes.unsqueeze(0), p=2).squeeze(1)
-        dist_to_dissimilar_prototypes = torch.cdist(s_ij, self.dissimilar_prototypes.unsqueeze(0), p=2).squeeze(1)
+        dist_to_similar_prototypes = torch.cdist(
+            s_ij, self.similar_prototypes.unsqueeze(0), p=2
+        ).squeeze(1)
+        dist_to_dissimilar_prototypes = torch.cdist(
+            s_ij, self.dissimilar_prototypes.unsqueeze(0), p=2
+        ).squeeze(1)
 
         # Compute similarity scores using the given formula
         similarity_similar = torch.pow(1 + torch.pow(dist_to_similar_prototypes, 2), -1)
-        similarity_dissimilar = torch.pow(1 + torch.pow(dist_to_dissimilar_prototypes, 2), -1)
+        similarity_dissimilar = torch.pow(
+            1 + torch.pow(dist_to_dissimilar_prototypes, 2), -1
+        )
 
         # Normalization step: Sum of similarities for each prototype set
         denom_similar = torch.sum(similarity_similar, dim=1, keepdim=True)
         denom_dissimilar = torch.sum(similarity_dissimilar, dim=1, keepdim=True)
 
         # Normalize similarity scores
-        similarity_similar_normalized = (similarity_similar / (denom_similar + denom_dissimilar))
-        similarity_dissimilar_normalized = (similarity_dissimilar / (denom_similar + denom_dissimilar))
+        similarity_similar_normalized = similarity_similar / (
+            denom_similar + denom_dissimilar
+        )
+        similarity_dissimilar_normalized = similarity_dissimilar / (
+            denom_similar + denom_dissimilar
+        )
 
         # Calculate the loss:
         # If label == 1 (similar), minimize distance to similar prototypes
         # If label == 0 (dissimilar), minimize distance to dissimilar prototypes
         loss = -torch.mean(
             label * torch.log(torch.sum(similarity_similar_normalized, dim=1))
-            + (1 - label) * torch.log(torch.sum(similarity_dissimilar_normalized, dim=1)))
+            + (1 - label)
+            * torch.log(torch.sum(similarity_dissimilar_normalized, dim=1))
+        )
 
         total_loss = loss
 
@@ -171,12 +202,17 @@ class LearnablePrototypicalLossWithDiversityRegularization(nn.Module):
 
     def compute_norms(self):
         # Compute norms for the similar prototypes
-        similar_norms = torch.norm(self.similar_prototypes, dim=1)  # Compute L2 norm for each vector
+        similar_norms = torch.norm(
+            self.similar_prototypes, dim=1
+        )  # Compute L2 norm for each vector
 
         # Compute norms for the dissimilar prototypes
-        dissimilar_norms = torch.norm(self.dissimilar_prototypes, dim=1)  # Compute L2 norm for each vector
+        dissimilar_norms = torch.norm(
+            self.dissimilar_prototypes, dim=1
+        )  # Compute L2 norm for each vector
 
         return similar_norms, dissimilar_norms
+
 
 ###############################
 # EXPERIMENT
@@ -185,24 +221,23 @@ class LearnablePrototypicalLossWithDiversityRegularization(nn.Module):
 
 class RecurrenceExperiment(Experiment):
     def __init__(
-            self,
-            model,
-            dataset,
-            context,
-            lr=0.001,
-            pre_train_lr=0.001,
-            epochs=10,
-            weight_decay=1e-4,
-            lr_step=3,
-            lr_gamma=0.5,
-            num_classes=7,
-            embedding_size=64,
-            margin=1.0,
-            **kwargs
-            ):
+        self,
+        model,
+        dataset,
+        context,
+        lr=0.001,
+        pre_train_lr=0.001,
+        epochs=10,
+        weight_decay=1e-4,
+        lr_step=3,
+        lr_gamma=0.5,
+        num_classes=7,
+        embedding_size=64,
+        margin=1.0,
+        **kwargs,
+    ):
 
-        super(RecurrenceExperiment, self)\
-            .__init__(model, dataset, context, **kwargs)
+        super(RecurrenceExperiment, self).__init__(model, dataset, context, **kwargs)
 
         self.epochs = epochs
         self.num_classes = num_classes
@@ -220,31 +255,30 @@ class RecurrenceExperiment(Experiment):
         self.criterion = LearnablePrototypicalLossWithDiversityRegularization(
             embedding_dim=self.embedding_size,
             num_similar_prototypes=2,
-            num_dissimilar_prototypes=2
+            num_dissimilar_prototypes=2,
         ).to(self.device)
         self.optimizer1 = torch.optim.Adam(
-            list(self.criterion.parameters()),
-            lr=self.lr
+            list(self.criterion.parameters()), lr=self.lr
         )
         self.optimizer2 = torch.torch.optim.SGD(
-            [{'params': self.model.parameters(), 'lr': self.lr}]
-            + [{'params': self.criterion.parameters(), 'lr': self.lr}]
+            [{"params": self.model.parameters(), "lr": self.lr}]
+            + [{"params": self.criterion.parameters(), "lr": self.lr}]
         )
         self.pre_criterion = PrototypicalCenterLoss(
             num_classes=self.num_classes,
             embedding_size=self.embedding_size,
-            margin=self.margin
+            margin=self.margin,
         ).to(self.device)
         self.pre_optimizer = torch.optim.Adam(
             list(model.parameters()) + list(self.pre_criterion.parameters()),
-            lr=self.pre_train_lr
+            lr=self.pre_train_lr,
         )
 
         self.scheduler = StepLR(self.optimizer1, step_size=lr_step, gamma=lr_gamma)
 
-################################
-# TRAINING FUNCTIONS ######
-################################
+    ################################
+    # TRAINING FUNCTIONS ######
+    ################################
     def pretrain_model_prototypical_center(self, dataloader, num_epochs):
 
         self.model.train()  # Set the self.model to training mode
@@ -281,7 +315,10 @@ class RecurrenceExperiment(Experiment):
             num_different_label_pairs = N // 2
 
             # Precompute label indices
-            label_to_indices = {label.item(): (Y == label).nonzero(as_tuple=True)[0].tolist() for label in torch.unique(Y)}
+            label_to_indices = {
+                label.item(): (Y == label).nonzero(as_tuple=True)[0].tolist()
+                for label in torch.unique(Y)
+            }
 
             X1, X2, labels = [], [], []
 
@@ -322,12 +359,16 @@ class RecurrenceExperiment(Experiment):
             return X1, X2, labels
         except Exception as e:
             fl.log(f"Error in generate_pairs(): {e}")
-            return torch.tensor([]), torch.tensor([]), torch.tensor([])
+            raise
 
     # Training loop with dynamic learning rate adjustment
-    def train_model_with_dynamic_lr(self, train_loader, optimizer, num_epochs, frozen=False):
+    def train_model_with_dynamic_lr(
+        self, train_loader, optimizer, num_epochs, frozen=False
+    ):
         try:
-            scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=self.lr_step, gamma=self.lr_gamma)  # Reduce LR by 0.5 every 50 epochs
+            scheduler = torch.optim.lr_scheduler.StepLR(
+                optimizer, step_size=self.lr_step, gamma=self.lr_gamma
+            )  # Reduce LR by 0.5 every 50 epochs
 
             for epoch in range(num_epochs):
                 self.model.train()
@@ -342,8 +383,14 @@ class RecurrenceExperiment(Experiment):
                     # Create pairs of samples and labels (1 for similar, 0 for dissimilar)
                     # pairs, labels = create_pairs(batch_data, batch_labels)
                     if True:
-                        pairs_1, pairs_2, labels = self.generate_pairs(batch_data, batch_labels, 50)
-                        pairs_1, pairs_2, labels = pairs_1.to(self.device), pairs_2.to(self.device), labels.to(self.device)
+                        pairs_1, pairs_2, labels = self.generate_pairs(
+                            batch_data, batch_labels, 50
+                        )
+                        pairs_1, pairs_2, labels = (
+                            pairs_1.to(self.device),
+                            pairs_2.to(self.device),
+                            labels.to(self.device),
+                        )
 
                     # Compute embeddings using the frozen encoder
                     if frozen:
@@ -351,7 +398,9 @@ class RecurrenceExperiment(Experiment):
                             # Compute embeddings for both elements of the pairs
                             embeddings_x1 = self.model(pairs_1.float())
                             embeddings_x2 = self.model(pairs_2.float())
-                            self.criterion.toggle_requires_grad(requires_grad_value=False)
+                            self.criterion.toggle_requires_grad(
+                                requires_grad_value=False
+                            )
 
                     else:
                         # Compute embeddings for both elements of the pairs
@@ -370,27 +419,33 @@ class RecurrenceExperiment(Experiment):
                     running_loss += loss.item()
 
                 scheduler.step()
-                return running_loss/len(train_loader)
+                return running_loss / len(train_loader)
         except Exception as e:
             fl.log(f"Error in train_model_with_dynamic_lr(): {e}")
-            return 0.0
-            # print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {running_loss/len(train_loader):.4f}, LR: {scheduler.get_last_lr()[0]:.6f}')
+            raise
 
     def training_loop(self, data_loaders):
         try:
             train_loader, _ = data_loaders
             self.pretrain_model_prototypical_center(train_loader, 1)
-            loss_avg1 = self.train_model_with_dynamic_lr(train_loader, self.optimizer1, 1)
-            loss_avg2 = self.train_model_with_dynamic_lr(train_loader, self.optimizer2, 1)
+            loss_avg1 = self.train_model_with_dynamic_lr(
+                train_loader, self.optimizer1, 1
+            )
+            loss_avg2 = self.train_model_with_dynamic_lr(
+                train_loader, self.optimizer2, 1
+            )
             return (loss_avg1 + loss_avg2) / 2, {}
         except Exception as e:
             fl.log(f"Error in training loop: {e}")
+            raise
 
-################################
-# TESTING  FUNCTIONS ######
-################################
+    ################################
+    # TESTING  FUNCTIONS ######
+    ################################
 
-    def knn_in_embedding_space(self, train_loader, test_loader, k=1, num_samples_for_pairs=20):
+    def knn_in_embedding_space(
+        self, train_loader, test_loader, k=1, num_samples_for_pairs=20
+    ):
 
         self.model.eval()
 
@@ -435,8 +490,14 @@ class RecurrenceExperiment(Experiment):
                 # Compute loss based on pairs in the test set
 
                 # Generate pairs for loss computation
-                pairs_1, pairs_2, labels = self.generate_pairs(batch_data, batch_labels, num_samples_for_pairs)
-                pairs_1, pairs_2, labels = pairs_1.to(self.device), pairs_2.to(self.device), labels.to(self.device)
+                pairs_1, pairs_2, labels = self.generate_pairs(
+                    batch_data, batch_labels, num_samples_for_pairs
+                )
+                pairs_1, pairs_2, labels = (
+                    pairs_1.to(self.device),
+                    pairs_2.to(self.device),
+                    labels.to(self.device),
+                )
 
                 # Compute embeddings for pairs
                 embeddings_x1 = self.model(pairs_1)
@@ -453,7 +514,7 @@ class RecurrenceExperiment(Experiment):
         else:
             avg_loss = 0.0
 
-        print(f'Average loss on test set: {avg_loss:.4f}')
+        print(f"Average loss on test set: {avg_loss:.4f}")
 
         # Convert predictions and true labels to tensors for consistency
         y_pred = torch.tensor(all_preds)
@@ -466,11 +527,21 @@ class RecurrenceExperiment(Experiment):
         self.model.to(self.device)
         self.model.eval()
 
-        accuracy = MulticlassAccuracy(num_classes=self.num_classes, average='macro').to(self.device)
-        precision = MulticlassPrecision(num_classes=self.num_classes, average='macro').to(self.device)
-        recall = MulticlassRecall(num_classes=self.num_classes, average='macro').to(self.device)
-        f1 = MulticlassF1Score(num_classes=self.num_classes, average='macro').to(self.device)
-        conf_matrix = MulticlassConfusionMatrix(num_classes=self.num_classes).to(self.device)
+        accuracy = MulticlassAccuracy(num_classes=self.num_classes, average="macro").to(
+            self.device
+        )
+        precision = MulticlassPrecision(
+            num_classes=self.num_classes, average="macro"
+        ).to(self.device)
+        recall = MulticlassRecall(num_classes=self.num_classes, average="macro").to(
+            self.device
+        )
+        f1 = MulticlassF1Score(num_classes=self.num_classes, average="macro").to(
+            self.device
+        )
+        conf_matrix = MulticlassConfusionMatrix(num_classes=self.num_classes).to(
+            self.device
+        )
 
         loss, predicted, label = self.knn_in_embedding_space(trainloader, testloader)
         predicted = torch.tensor(predicted).to(self.device)

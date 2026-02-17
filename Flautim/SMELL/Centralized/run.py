@@ -7,7 +7,7 @@ import torch
 import numpy as np
 import random
 
-DATASET = "PAMAP"
+DATASET = "WISDM"
 NUM_CHANNELS = 6
 BATCH_SIZE = 32
 NUM_EPOCHS = 50
@@ -119,7 +119,7 @@ if __name__ == "__main__":
             combined_train_data,
             combined_test_data,
             batch_size=BATCH_SIZE,
-            augment_multiplier=2,
+            augment_multiplier=0,
             use_crop=False,
             use_erase=False,
             use_jitter=False,
@@ -141,8 +141,9 @@ if __name__ == "__main__":
             epochs=NUM_EPOCHS,
             weight_decay=WEIGHT_DECAY,
             lr_step=LEARNING_RATE_STEP,
+            num_classes=NUM_CLASSES,
             lr_gamma=LEARNING_RATE_GAMMA,
-            embedding_size=EMB_DIM
+            embedding_size=EMB_DIM,
         )
 
         def balanced_accuracy(y_true, y_pred):
@@ -170,3 +171,4 @@ if __name__ == "__main__":
         experiment.run(metrics={"ACCURACY": flm.Metrics.balanced_accuracy})
     except Exception as e:
         fl.log(f"Error in run.py: {e}")
+        raise
