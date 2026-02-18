@@ -1,2 +1,227 @@
 /dissertacao/code/results/recurrence_plots/
+# =========================================================
+
+# Python
+
+# =========================================================
+
+**pycache**/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+pip-wheel-metadata/
+
+# =========================================================
+
+# Virtual environments (VERY IMPORTANT)
+
+# =========================================================
+
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# pyenv
+
+.python-version
+
+# =========================================================
+
+# Jupyter Notebook
+
+# =========================================================
+
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
+# =========================================================
+
+# Machine Learning artifacts
+
+# (models, checkpoints, logs, experiments)
+
+# =========================================================
+
+# PyTorch
+
+*.pt
+*.pth
+*.ckpt
+
+# TensorFlow / Keras
+
+*.pb
+*.h5
+*.keras
+*.tflite
+checkpoint
+saved_model/
+
+# Experiment tracking
+
+runs/
+wandb/
+mlruns/
+lightning_logs/
+tensorboard/
+tb_logs/
+
+# Training outputs
+
+outputs/
+results/
+predictions/
+inference/
+logs/
+checkpoints/
+experiments/
+cache/
+
+# =========================================================
+
+# Datasets (NEVER commit datasets)
+
+# =========================================================
+
+data/
+datasets/
+dataset/
+raw_data/
+processed_data/
+*.csv
+*.tsv
+*.jsonl
+*.parquet
+*.feather
+
+# (allow small example datasets if you want)
+
+!data/README.md
+!data/*.txt
+
+# =========================================================
+
+# Numpy / scipy / large arrays
+
+# =========================================================
+
+*.npy
+*.npz
+*.mat
+
+# =========================================================
+
+# Editors & IDEs
+
+# =========================================================
+
+# VSCode
+
+.vscode/
+
+# PyCharm / IntelliJ
+
+.idea/
+*.iml
+
+# Vim
+
+*.swp
+*.swo
+*~
+
+# =========================================================
+
+# macOS
+
+# =========================================================
+
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Thumbnails
+
+._*
+
+# =========================================================
+
+# Linux
+
+# =========================================================
+
+*~
+.nfs*
+
+# =========================================================
+
+# Testing / coverage
+
+# =========================================================
+
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+pytest_cache/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# =========================================================
+
+# Documentation
+
+# =========================================================
+
+docs/_build/
+
+# =========================================================
+
+# Misc
+
+# =========================================================
+
+*.log
+*.tmp
+*.temp
+*.bak
+
+# dotenv
+
+.env
+.env.*
+.envrc
+
+# secrets (VERY IMPORTANT)
+
+secrets/
+credentials.json
+config/local.yaml
+config/private.yaml
  
