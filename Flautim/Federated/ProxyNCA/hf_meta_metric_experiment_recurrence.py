@@ -21,8 +21,8 @@ from meta_metric_model import MetaMetricModel, extract_embeddings
 
 @dataclass
 class HFMetaMetricConfig:
-    alpha: float = 1e-4              # inner LR
-    inner_epochs: int = 1            # epochs over support loader
+    alpha: float = 1e-4  # inner LR
+    inner_epochs: int = 1  # epochs over support loader
     lambda_offset: float = 1e-3
     temperature: float = 0.1
     normalize_embeddings: bool = True
@@ -89,7 +89,9 @@ class HFMetaMetricRecurrenceExperiment(Experiment):
 
                 proxies_eff = self.model.proxies + deltaP  # P_client
 
-                with autocast(enabled=bool(self.cfg.use_amp and self.device.type == "cuda")):
+                with autocast(
+                    enabled=bool(self.cfg.use_amp and self.device.type == "cuda")
+                ):
                     emb = extract_embeddings(adapted_backbone, x)
                     loss_proxy = self.loss_fn(emb, proxies_eff, y)
                     loss_reg = self.cfg.lambda_offset * deltaP.pow(2).sum()
@@ -104,7 +106,7 @@ class HFMetaMetricRecurrenceExperiment(Experiment):
                     params + [deltaP],
                     create_graph=False,
                     retain_graph=False,
-                    allow_unused=True,   # <-- FIX
+                    allow_unused=True,  # <-- FIX
                 )
 
                 grads_backbone = grads[:-1]
@@ -120,8 +122,17 @@ class HFMetaMetricRecurrenceExperiment(Experiment):
                     if grad_delta is not None:
                         deltaP.add_(grad_delta, alpha=-float(self.cfg.alpha))
 
-
-                del x, y, emb, loss, loss_proxy, loss_reg, grads, grads_backbone, grad_delta
+                del (
+                    x,
+                    y,
+                    emb,
+                    loss,
+                    loss_proxy,
+                    loss_reg,
+                    grads,
+                    grads_backbone,
+                    grad_delta,
+                )
 
         return total_loss / max(1, total_samples)
 
@@ -141,8 +152,10 @@ class HFMetaMetricRecurrenceExperiment(Experiment):
         names = [f"backbone.{n}" for n, _ in named_backbone] + ["proxies"]
         params = [p for _, p in named_backbone] + [self.model.proxies]
 
-        grads_sum = {name: torch.zeros_like(param, device="cpu") for name, param in zip(names, params)}
-
+        grads_sum = {
+            name: torch.zeros_like(param, device="cpu")
+            for name, param in zip(names, params)
+        }
 
         total_samples = 0
         total_loss = 0.0
@@ -155,31 +168,40 @@ class HFMetaMetricRecurrenceExperiment(Experiment):
             bs = y.size(0)
             total_samples += bs
 
-            with autocast(enabled=bool(self.cfg.use_amp and self.device.type == "cuda")):
+            with autocast(
+                enabled=bool(self.cfg.use_amp and self.device.type == "cuda")
+            ):
                 emb = extract_embeddings(adapted_backbone, x)
                 loss = self.loss_fn(emb, proxies_eff, y)
 
             total_loss += float(loss.detach().cpu()) * bs
 
-            grads = torch.autograd.grad(loss, params, create_graph=False, retain_graph=False, allow_unused=True)
+            grads = torch.autograd.grad(
+                loss, params, create_graph=False, retain_graph=False, allow_unused=True
+            )
 
             for name, g in zip(names, grads):
                 if g is None:
                     continue
                 grads_sum[name].add_(g.detach().cpu() * bs)
 
-
-
             del x, y, emb, loss, grads
-            
-        avg_grads = {k: (v / max(1, total_samples)).numpy() for k, v in grads_sum.items()}
+
+        avg_grads = {
+            k: (v / max(1, total_samples)).numpy() for k, v in grads_sum.items()
+        }
         return avg_grads, int(total_samples), total_loss / max(1, total_samples)
 
-
-
     # -------- Flower fit() --------
-    def fit(self, parameters: NDArrays, config: Dict[str, Scalar]) -> Tuple[NDArrays, int, Dict]:
-        self.log(f"{self.client_name} - HFMetaMetric client training started", details="", object="", object_id=self.id)
+    def fit(
+        self, parameters: NDArrays, config: Dict[str, Scalar]
+    ) -> Tuple[NDArrays, int, Dict]:
+        self.log(
+            f"{self.client_name} - HFMetaMetric client training started",
+            details="",
+            object="",
+            object_id=self.id,
+        )
         self.epoch_fl = int(config.get("server_round", 0))
 
         # Load global
@@ -189,37 +211,58 @@ class HFMetaMetricRecurrenceExperiment(Experiment):
         if self.adapted_backbone is not None:
             del self.adapted_backbone
         self.adapted_backbone = copy.deepcopy(self.model.backbone).to(self.device)
-        
+
         self.adapted_backbone = copy.deepcopy(self.model.backbone).to(self.device)
         for p in self.adapted_backbone.parameters():
             p.requires_grad_(True)
 
-
         # ΔP init zero each round
-        deltaP = torch.zeros_like(self.model.proxies, device=self.device, requires_grad=True)
+        deltaP = torch.zeros_like(
+            self.model.proxies, device=self.device, requires_grad=True
+        )
 
         # RecurrenceDatasetnew returns [train_loader, test_loader]
         support_loader, query_loader = self.dataset.dataloader(validation=False)
 
-        support_loss = self.train_model_with_offsets(self.adapted_backbone, support_loader, deltaP)
-        query_grads, query_n, query_loss = self.compute_query_grads(self.adapted_backbone, query_loader, deltaP)
+        support_loss = self.train_model_with_offsets(
+            self.adapted_backbone, support_loader, deltaP
+        )
+        query_grads, query_n, query_loss = self.compute_query_grads(
+            self.adapted_backbone, query_loader, deltaP
+        )
 
         grads_file = f"hfmm_{self.client_name}"
         np.savez(f"gradients_{grads_file}.npz", **query_grads)
 
         del deltaP
 
-        self.log(f"{self.client_name} - HFMetaMetric client finished", details="", object="", object_id=self.id)
+        self.log(
+            f"{self.client_name} - HFMetaMetric client finished",
+            details="",
+            object="",
+            object_id=self.id,
+        )
 
         return (
             self.get_parameters({}),
             int(query_n),  # IMPORTANT: weight by query size
-            {"support_loss": float(support_loss), "query_loss": float(query_loss), "grads_file": grads_file},
+            {
+                "support_loss": float(support_loss),
+                "query_loss": float(query_loss),
+                "grads_file": grads_file,
+            },
         )
 
     # -------- Evaluation (adapt on support, test on query) --------
-    def evaluate(self, parameters: NDArrays, config: Dict[str, Scalar]) -> Tuple[float, int, Dict]:
-        self.log(f"{self.client_name} - HFMetaMetric evaluation started", details="", object="experiment_evaluate", object_id=self.id)
+    def evaluate(
+        self, parameters: NDArrays, config: Dict[str, Scalar]
+    ) -> Tuple[float, int, Dict]:
+        self.log(
+            f"{self.client_name} - HFMetaMetric evaluation started",
+            details="",
+            object="experiment_evaluate",
+            object_id=self.id,
+        )
         self.epoch_fl = int(config.get("server_round", 0))
 
         self.set_parameters(parameters)
@@ -227,12 +270,14 @@ class HFMetaMetricRecurrenceExperiment(Experiment):
         support_loader, query_loader = self.dataset.dataloader(validation=True)
 
         adapted_backbone = copy.deepcopy(self.model.backbone).to(self.device)
-        deltaP = torch.zeros_like(self.model.proxies, device=self.device, requires_grad=True)
+        deltaP = torch.zeros_like(
+            self.model.proxies, device=self.device, requires_grad=True
+        )
 
         _ = self.train_model_with_offsets(adapted_backbone, support_loader, deltaP)
 
         adapted_backbone.eval()
-        proxies_eff = (self.model.proxies + deltaP.detach())
+        proxies_eff = self.model.proxies + deltaP.detach()
 
         all_preds: List[int] = []
         all_labels: List[int] = []
@@ -243,7 +288,9 @@ class HFMetaMetricRecurrenceExperiment(Experiment):
             y = y.to(self.device, non_blocking=True)
             bs = y.size(0)
 
-            with autocast(enabled=bool(self.cfg.use_amp and self.device.type == "cuda")):
+            with autocast(
+                enabled=bool(self.cfg.use_amp and self.device.type == "cuda")
+            ):
                 emb = extract_embeddings(adapted_backbone, x)
                 loss = self.loss_fn(emb, proxies_eff, y)
 
@@ -254,7 +301,6 @@ class HFMetaMetricRecurrenceExperiment(Experiment):
             if self.cfg.normalize_proxies:
                 P = torch.nn.functional.normalize(P, p=2, dim=-1)
 
-            
             with torch.cuda.amp.autocast(enabled=False):
                 emb_fp32 = emb.float()
                 P_fp32 = P.float()
@@ -269,22 +315,42 @@ class HFMetaMetricRecurrenceExperiment(Experiment):
 
             del x, y, emb, loss, logits, pred
 
-        loss_avg = total_loss / max(1, total_samples)
+        loss = total_loss / max(1, total_samples)
         bal_acc = balanced_accuracy_score(all_labels, all_preds)
-        prec = precision_score(all_labels, all_preds, average="weighted", zero_division=0)
+        prec = precision_score(
+            all_labels, all_preds, average="weighted", zero_division=0
+        )
         f1 = f1_score(all_labels, all_preds, average="weighted")
 
-        metrics = {
-            "LOSS": float(loss_avg),
+        values_metrics_validation = {
+            "LOSS": float(loss),
             "TEST_ACC": float(bal_acc),
             "TEST_PREC": float(prec),
             "TEST_F1": float(f1),
         }
 
-        for k, v in metrics.items():
-            try:
-                self.measures.log(self, k, v, validation=True, epoch=self.epoch_fl)
-            except Exception:
-                pass
+        return_dic = {}
+        for name in values_metrics_validation:
+            self.measures.log(
+                self,
+                name,
+                values_metrics_validation[name],
+                validation=True,
+                epoch=self.epoch_fl,
+            )
+            return_dic[name] = float(values_metrics_validation[name])
 
-        self.log(f"{self.client_name} 
+        self.model.save()
+        self.log(
+            f"{self.client_name} - evaluation finished",
+            details="",
+            object="experiment_evaluate",
+            object_id=self.id,
+        )
+
+        torch.cuda.empty_cache()
+        return (
+            float(loss),
+            len(self.dataset.dataloader(validation=True)),
+            return_dic,
+        )

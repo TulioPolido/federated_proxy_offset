@@ -1,4 +1,5 @@
 from __future__ import annotations
+from flautim.pytorch.Model import Model
 
 from collections import OrderedDict
 from typing import List
@@ -6,19 +7,25 @@ import torch
 import torch.nn as nn
 
 
-def extract_embeddings(backbone: nn.Module, x: torch.Tensor) -> torch.Tensor:
+def extract_embeddings(backbone: Model, x: torch.Tensor) -> torch.Tensor:
     """
     Preferência:
       1) se existir forward_embedding(x), usa
       2) senão, tenta padrões (Tensor / tuple / dict)
     """
-    if hasattr(backbone, "forward_embedding") and callable(getattr(backbone, "forward_embedding")):
+    if hasattr(backbone, "forward_embedding") and callable(
+        getattr(backbone, "forward_embedding")
+    ):
         return backbone.forward_embedding(x)
 
     out = backbone(x)
     if isinstance(out, torch.Tensor):
         return out
-    if isinstance(out, (tuple, list)) and len(out) > 0 and isinstance(out[0], torch.Tensor):
+    if (
+        isinstance(out, (tuple, list))
+        and len(out) > 0
+        and isinstance(out[0], torch.Tensor)
+    ):
         return out[0]
     if isinstance(out, dict):
         for k in ("embeddings", "embedding", "feat", "features", "z"):
@@ -27,18 +34,31 @@ def extract_embeddings(backbone: nn.Module, x: torch.Tensor) -> torch.Tensor:
     raise TypeError(f"Backbone output not supported: {type(out)}")
 
 
-class MetaMetricModel(nn.Module):
+class MetaMetricModel(Model):
     """
     backbone: embedding extractor
     proxies:  nn.Parameter [C, D] (entra no state_dict)
     """
 
-    def __init__(self, backbone: nn.Module, num_classes: int, emb_dim: int, init_scale: float = 0.01):
-        super().__init__()
+    def __init__(
+        self,
+        context,  # <-- faltava isso
+        backbone: Model,
+        num_classes: int,
+        emb_dim: int,
+        init_scale: float = 0.01,
+        suffix=0,
+    ):
+        super().__init__(context)  # <-- ESSENCIAL
+
         self.backbone = backbone
+        self.suffix = suffix
         self.num_classes = int(num_classes)
         self.emb_dim = int(emb_dim)
-        self.proxies = nn.Parameter(init_scale * torch.randn(self.num_classes, self.emb_dim))
+
+        self.proxies = nn.Parameter(
+            init_scale * torch.randn(self.num_classes, self.emb_dim)
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return extract_embeddings(self.backbone, x)
@@ -50,4 +70,3 @@ class MetaMetricModel(nn.Module):
         params_dict = zip(self.state_dict().keys(), parameters)
         state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
         self.load_state_dict(state_dict, strict=True)
-

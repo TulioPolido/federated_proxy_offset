@@ -13,7 +13,10 @@ import RecurrenceModel
 import FedMetaRecurrenceDatasetnew
 
 from meta_metric_model import MetaMetricModel
-from hf_meta_metric_experiment_recurrence import HFMetaMetricRecurrenceExperiment, HFMetaMetricConfig
+from hf_meta_metric_experiment_recurrence import (
+    HFMetaMetricRecurrenceExperiment,
+    HFMetaMetricConfig,
+)
 from hf_meta_metric_strategy import HFMetaMetricStrategy
 
 
@@ -22,6 +25,7 @@ NUM_CHANNELS = 6
 BATCH_SIZE = 32
 NUM_ROUNDS = 100
 INNER_EPOCHS = 1
+
 
 def fit_config(server_round: int):
     return {"server_round": server_round}
@@ -32,7 +36,7 @@ def generate_server_fn(context, eval_fn=None):
         # backbone = seu RecurrenceModel (MobileNetV2 modificado)
         backbone = RecurrenceModel.RecurrenceModel(
             context,
-            num_classes=NUM_CLASSES,      # usado só para classifier (não é o embedding)
+            num_classes=NUM_CLASSES,  # usado só para classifier (não é o embedding)
             num_channels=NUM_CHANNELS,
             suffix=0,
         )
@@ -40,7 +44,13 @@ def generate_server_fn(context, eval_fn=None):
         # Emb dim = 1280 no MobileNetV2
         emb_dim = int(backbone.base_model.last_channel)
 
-        net = MetaMetricModel(backbone=backbone, num_classes=NUM_CLASSES, emb_dim=emb_dim)
+        net = MetaMetricModel(
+            context,
+            backbone=backbone,
+            num_classes=NUM_CLASSES,
+            emb_dim=emb_dim,
+            suffix=0,
+        )
         params = ndarrays_to_parameters(net.get_parameters())
 
         strategy = HFMetaMetricStrategy(
@@ -74,7 +84,13 @@ def generate_client_fn(context, files, test_file):
         )
         emb_dim = int(backbone.base_model.last_channel)
 
-        model = MetaMetricModel(backbone=backbone, num_classes=NUM_CLASSES, emb_dim=emb_dim)
+        model = MetaMetricModel(
+            context,
+            backbone=backbone,
+            num_classes=NUM_CLASSES,
+            emb_dim=emb_dim,
+            suffix=cid,
+        )
 
         dataset = FedMetaRecurrenceDatasetnew.RecurrenceDatasetnew(
             train_file=train_file,
@@ -131,11 +147,15 @@ if __name__ == "__main__":
         fl.log(f"Test users: {test_users}")
 
         files = [
-            torch.load(f"./data/WISDM_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt")
+            torch.load(
+                f"./data/WISDM_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
+            )
             for i in train_users
         ]
         test_files = [
-            torch.load(f"./data/WISDM_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt")
+            torch.load(
+                f"./data/WISDM_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
+            )
             for i in test_users
         ]
 
@@ -155,11 +175,15 @@ if __name__ == "__main__":
         fl.log(f"Test users: {test_users}")
 
         files = [
-            torch.load(f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt")
+            torch.load(
+                f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
+            )
             for i in train_users
         ]
         test_files = [
-            torch.load(f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt")
+            torch.load(
+                f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
+            )
             for i in test_users
         ]
 
@@ -181,4 +205,3 @@ if __name__ == "__main__":
         num_rounds=NUM_ROUNDS,
         clients_resources=clients_resources,
     )
-
