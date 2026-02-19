@@ -20,7 +20,7 @@ from hf_meta_metric_experiment_recurrence import (
 from hf_meta_metric_strategy import HFMetaMetricStrategy
 
 
-DATASET = "WISDM"
+DATASET = "PAMAP"
 NUM_CHANNELS = 6
 BATCH_SIZE = 32
 NUM_ROUNDS = 100
