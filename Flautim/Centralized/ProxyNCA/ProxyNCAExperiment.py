@@ -126,19 +126,20 @@ class HFMetaMetricRecurrenceExperiment(Experiment):
 
         del deltaP
 
-        return total_loss / max(1, total_samples), {}
+        return total_loss / max(1, total_samples)
 
     def training_loop(self, data_loader):
+        train_loader, _ = data_loader
         loss_avg = self.train_model_with_offsets(
-            adapted_backbone=self.model.backbone, support_loader=data_loader
+            adapted_backbone=self.model.backbone, support_loader=train_loader
         )
-        return loss_avg, {}
+        return float(loss_avg), {}
 
     def validation_loop(self, data_loader):
         deltaP = torch.zeros_like(
             self.model.proxies, device=self.device, requires_grad=True
         )
-
+        _, test_loader = data_loader
         self.model.backbone.eval()
         proxies_eff = self.model.proxies + deltaP.detach()
 
@@ -146,7 +147,7 @@ class HFMetaMetricRecurrenceExperiment(Experiment):
         all_labels: List[int] = []
         total_loss, total_samples = 0.0, 0
 
-        for x, y in data_loader:
+        for x, y in test_loader:
             x = x.to(self.device, non_blocking=True)
             y = y.to(self.device, non_blocking=True)
             bs = y.size(0)
@@ -185,7 +186,7 @@ class HFMetaMetricRecurrenceExperiment(Experiment):
         )
         f1 = f1_score(all_labels, all_preds, average="weighted")
 
-        return loss, {
+        return float(loss), {
             "LOSS": float(loss),
             "TEST_ACC": float(bal_acc),
             "TEST_PREC": float(prec),
