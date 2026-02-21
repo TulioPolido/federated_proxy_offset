@@ -16,7 +16,7 @@ from ProxyNCAExperiment import (
 DATASET = "PAMAP"
 NUM_CHANNELS = 6
 BATCH_SIZE = 32
-EPOCHS = 1000
+EPOCHS = 1500
 
 
 if __name__ == "__main__":
