@@ -2,8 +2,8 @@ from collections import OrderedDict
 from typing import Dict, List, Optional, Tuple, Union
 from flautim.pytorch.common import run_federated, weighted_average
 import numpy as np
-import SmellRecurrenceModel
-import FedMetaRecurrenceDataset
+import RecurrenceModel
+import FedMetaRecurrenceDatasetnew
 import FedMetaSmellRecurrenceExperiment
 import flwr
 import torch
@@ -29,6 +29,7 @@ import flautim as fl
 import random
 
 from FedMetaStrategy import HFMetaMetricStrategy
+from meta_metric_model import MetaMetricModel
 
 DATASET = "PAMAP"
 NUM_CHANNELS = 6
@@ -49,8 +50,22 @@ def fit_config(server_round):
 def generate_server_fn(context, eval_fn=None):
     def create_server_fn(context_flwr):
 
-        net = SmellRecurrenceModel.RecurrenceModel(
-            context, emb_dim=EMB_DIM, num_channels=NUM_CHANNELS, suffix=0
+        backbone = RecurrenceModel.RecurrenceModel(
+            context,
+            num_classes=NUM_CLASSES,  # usado só para classifier (não é o embedding)
+            num_channels=NUM_CHANNELS,
+            suffix=0,
+        )
+
+        # Emb dim = 1280 no MobileNetV2
+        emb_dim = int(backbone.base_model.last_channel)
+
+        net = MetaMetricModel(
+            context,
+            backbone=backbone,
+            num_classes=NUM_CLASSES,
+            emb_dim=emb_dim,
+            suffix=0,
         )
         params = ndarrays_to_parameters(net.get_parameters())
 
@@ -76,14 +91,26 @@ def generate_client_fn(context, files, test_file):
     def create_client_fn(context_flwr):
 
         cid = int(context_flwr.node_config["partition-id"])
-        file = files[cid]
+        train_file = files[cid]
 
-        model = SmellRecurrenceModel.RecurrenceModel(
-            context, emb_dim=EMB_DIM, num_channels=NUM_CHANNELS, suffix=cid
+        backbone = RecurrenceModel.RecurrenceModel(
+            context,
+            num_classes=NUM_CLASSES,
+            num_channels=NUM_CHANNELS,
+            suffix=cid,
+        )
+        emb_dim = int(backbone.base_model.last_channel)
+
+        model = MetaMetricModel(
+            context,
+            backbone=backbone,
+            num_classes=NUM_CLASSES,
+            emb_dim=emb_dim,
+            suffix=cid,
         )
 
-        dataset = FedMetaRecurrenceDataset.RecurrenceDataset(
-            train_file=file,
+        dataset = FedMetaRecurrenceDatasetnew.RecurrenceDatasetnew(
+            train_file=train_file,
             test_file=test_file,
             augment_multiplier=AUGMENTATION,
             use_crop=False,
@@ -91,6 +118,7 @@ def generate_client_fn(context, files, test_file):
             use_jitter=False,
             use_rotation=True,
             num_workers=0,
+            batch_size=BATCH_SIZE,
         )
 
         return FedMetaSmellRecurrenceExperiment.RecurrenceExperiment(
