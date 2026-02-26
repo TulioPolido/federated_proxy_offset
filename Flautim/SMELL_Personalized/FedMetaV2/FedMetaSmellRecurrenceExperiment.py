@@ -26,6 +26,7 @@ import copy
 
 from sklearn.decomposition import PCA
 
+from meta_metric_model import MetaMetricModel, extract_embeddings
 from smell_loss import (
     LearnablePrototypicalLossWithDiversityRegularization,
     PrototypicalCenterLoss,
