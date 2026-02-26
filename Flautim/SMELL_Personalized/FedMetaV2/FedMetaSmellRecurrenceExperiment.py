@@ -75,38 +75,24 @@ class RecurrenceExperiment(Experiment):
         self.model.to(self.device)
         self.adapted_model = copy.deepcopy(self.model).to(self.device)
 
-        self.criterion = LearnablePrototypicalLossWithDiversityRegularization(
+        self.loss_fn = LearnablePrototypicalLossWithDiversityRegularization(
             embedding_dim=self.embedding_size,
             num_similar_prototypes=2,
             num_dissimilar_prototypes=2,
         ).to(self.device)
-        # self.optimizer1 = torch.optim.Adam(
-        #     list(self.criterion.parameters()), lr=self.lr
-        # )
-        # self.optimizer2 = torch.torch.optim.SGD(
-        #     [{"params": self.model.parameters(), "lr": self.lr}]
-        #     + [{"params": self.criterion.parameters(), "lr": self.lr}]
-        # )
+
         self.pre_criterion = PrototypicalCenterLoss(
             num_classes=self.num_classes,
             embedding_size=self.embedding_size,
             margin=self.margin,
         ).to(self.device)
-        # self.pre_optimizer = torch.optim.Adam(
-        #     list(model.parameters()) + list(self.pre_criterion.parameters()),
-        #     lr=self.pre_train_lr,
-        # )
-
-        # self.scheduler = StepLR(self.optimizer1, step_size=lr_step, gamma=lr_gamma)
 
     def get_parameters(self, config: Dict[str, Scalar]) -> NDArrays:
-        """Return the parameters of the current net."""
-        return [val.cpu().numpy() for _, val in self.model.state_dict().items()]
+        return [v.cpu().numpy() for _, v in self.model.state_dict().items()]
 
     def set_parameters(self, parameters: NDArrays) -> None:
-        """Change the parameters of the model using the given ones."""
         params_dict = zip(self.model.state_dict().keys(), parameters)
-        state_dict = OrderedDict({k: torch.Tensor(v) for k, v in params_dict})
+        state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
         self.model.load_state_dict(state_dict, strict=True)
 
     ################################
@@ -272,184 +258,189 @@ class RecurrenceExperiment(Experiment):
 
         return running_loss / max(1, len(dataloader))
 
-    def train_model(self, model, train_loader, alpha, num_epochs=1, only_markers=False):
-        model.train()
-        self.criterion.train()  # criterion has learnable params
+    def train_model_with_offsets(
+        self,
+        adapted_backbone: nn.Module,
+        support_loader,
+        deltaP: torch.Tensor,  # [C, D], requires_grad=True
+    ) -> float:
+        adapted_backbone.train()
+        total_loss, total_samples = 0.0, 0
 
-        # Choose params based on flag
-        if only_markers:
-            train_params = list(self.criterion.parameters())
-        else:
-            train_params = list(model.parameters()) + list(self.criterion.parameters())
+        for _ in range(int(self.cfg.inner_epochs)):
+            for x, y in support_loader:
+                x = x.to(self.device, non_blocking=True)
+                y = y.to(self.device, non_blocking=True)
+                bs = y.size(0)
 
-        for epoch in range(num_epochs):
-            total_loss, total_samples = 0.0, 0
+                # COMO ISSO SERÁ USADO COM O SMELL??
+                proxies_eff = self.model.proxies + deltaP  # P_client
 
-            for batch_data, batch_labels in train_loader:
-                batch_data = batch_data.to(self.device, non_blocking=True).float()
-                batch_labels = batch_labels.to(self.device, non_blocking=True)
+                with autocast(
+                    enabled=bool(self.cfg.use_amp and self.device.type == "cuda")
+                ):
+                    idx1, idx2, y = self.generate_pair_indices(y, N=200)
+                    emb1 = extract_embeddings(adapted_backbone, x[idx1])
+                    emb2 = extract_embeddings(adapted_backbone, x[idx2])
+                    loss_proxy = self.loss_fn(emb1, emb2, y)
+                    loss_reg = 0  # self.cfg.lambda_offset * deltaP.pow(2).sum()
+                    loss = loss_proxy  # + loss_reg
 
-                with autocast(enabled=True):
-                    idx1, idx2, y = self.generate_pair_indices(batch_labels, N=200)
-                    e1 = model(batch_data[idx1])
-                    e2 = model(batch_data[idx2])
-                    loss = self.criterion(e1, e2, y)
+                total_loss += float(loss.detach().cpu()) * bs
+                total_samples += bs
 
-                total_loss += loss.item() * y.size(0)
-                total_samples += y.size(0)
-
-                # Compute gradients ONLY for chosen params
+                params = list(adapted_backbone.parameters())
                 grads = torch.autograd.grad(
-                    loss, train_params, create_graph=False, allow_unused=True
+                    loss,
+                    params + [deltaP],
+                    create_graph=False,
+                    retain_graph=False,
+                    allow_unused=True,  # <-- FIX
                 )
 
-                # Manual SGD step
+                grads_backbone = grads[:-1]
+                grad_delta = grads[-1]
+
                 with torch.no_grad():
-                    for param, grad_ in zip(train_params, grads):
-                        if grad_ is not None:
-                            param -= alpha * grad_
+                    for p, g in zip(params, grads_backbone):
+                        if g is None:
+                            continue
+                        p.add_(g, alpha=-float(self.cfg.alpha))
 
-                del e1, e2, idx1, idx2, y, grads, batch_data, batch_labels, loss
-                torch.cuda.empty_cache()
+                    # Se deltaP não apareceu no grafo por algum motivo, não atualiza
+                    if grad_delta is not None:
+                        deltaP.add_(grad_delta, alpha=-float(self.cfg.alpha))
 
-            torch.cuda.synchronize()
+                del (
+                    x,
+                    y,
+                    emb1,
+                    emb2,
+                    loss,
+                    loss_proxy,
+                    # loss_reg,
+                    grads,
+                    grads_backbone,
+                    grad_delta,
+                )
 
         return total_loss / max(1, total_samples)
 
-    def compute_query_loss(self, model, query_loader, num_samples_for_pairs=200):
-        model.train()
-        self.criterion.eval()
-        grads_sum = [torch.zeros_like(p, device="cpu") for p in model.parameters()]
+    def compute_query_grads(
+        self,
+        adapted_backbone: nn.Module,
+        query_loader,
+        deltaP: torch.Tensor,
+    ) -> Tuple[List[np.ndarray], int, float]:
+        adapted_backbone.eval()
+        self.model.proxies.requires_grad_(True)
+
+        # Em vez de params = list(adapted_backbone.parameters()) + [self.model.proxies]
+        # vamos pegar NOMES compatíveis com o modelo global:
+        named_backbone = list(adapted_backbone.named_parameters())
+        names = [f"backbone.{n}" for n, _ in named_backbone] + ["proxies"]
+        params = [p for _, p in named_backbone] + [self.model.proxies]
+
+        grads_sum = {
+            name: torch.zeros_like(param, device="cpu")
+            for name, param in zip(names, params)
+        }
+
         total_samples = 0
+        total_loss = 0.0
 
-        for batch_data, batch_labels in query_loader:
-            # batch_data = batch_data.to(self.device, non_blocking=True).float()
-            # batch_labels = batch_labels.to(self.device, non_blocking=True)
-            # batch_size = batch_labels.size(0)
-            # total_samples += batch_size
-            batch_data, batch_labels = batch_data.to(self.device), batch_labels.to(
-                self.device
-            )  # Carrega os dados e labels na GPU
-            batch_size = batch_labels.size(0)  # Inicializa o tamanho do batch
-            total_samples += batch_size  # Soma o tamanho do batch ao total de samples
+        proxies_eff = self.model.proxies + deltaP.detach()  # IMPORTANT: no grad into ΔP
 
-            with autocast(enabled=True):
-                idx1, idx2, y = self.generate_pair_indices(
-                    batch_labels, N=num_samples_for_pairs
-                )  # Gera pares similares/dissimilares e retorna seus índices e label
-                e1 = model(
-                    batch_data[idx1]
-                )  # Manda os dados do índice 1 para o modelo e guarda os embeddings
-                e2 = model(
-                    batch_data[idx2]
-                )  # Manda os dados do índice 2 para o modelo e guarda os embeddings
-                loss = self.criterion(
-                    e1, e2, y
-                )  # Calcula a entropia cruzada binária para pares similares/dissimilares
+        for x, y in query_loader:
+            x = x.to(self.device, non_blocking=True)
+            y = y.to(self.device, non_blocking=True)
+            bs = y.size(0)
+            total_samples += bs
+
+            with autocast(
+                enabled=bool(self.cfg.use_amp and self.device.type == "cuda")
+            ):
+                idx1, idx2, y = self.generate_pair_indices(y, N=200)
+                emb1 = extract_embeddings(adapted_backbone, x[idx1])
+                emb2 = extract_embeddings(adapted_backbone, x[idx2])
+                loss = self.loss_fn(emb1, emb2, y)
+
+            total_loss += float(loss.detach().cpu()) * bs
 
             grads = torch.autograd.grad(
-                loss, list(model.parameters()), create_graph=False
-            )  # Calcula os gradientes do modelo recebido
+                loss, params, create_graph=False, retain_graph=False, allow_unused=True
+            )
 
-            for i, g in enumerate(grads):
-                if g is not None:
-                    grads_sum[i] += g.detach().cpu() * batch_size
+            for name, g in zip(names, grads):
+                if g is None:
+                    continue
+                grads_sum[name].add_(g.detach().cpu() * bs)
 
-            del e1, e2, idx1, idx2, y, loss, grads, batch_data, batch_labels
-            torch.cuda.empty_cache()
+            del x, y, emb1, emb2, idx1, idx2, loss, grads
 
-        avg_grads = [g / total_samples for g in grads_sum]
-        grads_np = [g.numpy() for g in avg_grads]
-
-        del grads_sum, avg_grads
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
-        return grads_np
+        avg_grads = {
+            k: (v / max(1, total_samples)).numpy() for k, v in grads_sum.items()
+        }
+        return avg_grads, int(total_samples), total_loss / max(1, total_samples)
 
     def fit(
         self, parameters: NDArrays, config: Dict[str, Scalar]
     ) -> Tuple[NDArrays, int, Dict]:
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
-
-        # alpha = config["alpha"]
         self.log(
-            f"{self.client_name} - Fit(): FedMeta client training started",
+            f"{self.client_name} - HFMetaMetric client training started",
+            details="",
+            object="",
             object_id=self.id,
         )
-        self.epoch_fl = config["server_round"]
+        self.epoch_fl = int(config.get("server_round", 0))
 
-        # # === Load prototypes ===
-        # prots_file_path = f"prototypes_{self.client_name}.npz"
+        # Load global
+        self.set_parameters(parameters)
 
-        # if os.path.exists(prots_file_path):
-        #     state = torch.load(prots_file_path, map_location=self.device)
-        #     self.criterion.load_state_dict(state)
+        # Copy backbone for adaptation
+        if self.adapted_backbone is not None:
+            del self.adapted_backbone
+        self.adapted_backbone = copy.deepcopy(self.model.backbone).to(self.device)
 
-        # === Load global model ===
-        self.model.set_parameters(parameters)
+        self.adapted_backbone = copy.deepcopy(self.model.backbone).to(self.device)
+        for p in self.adapted_backbone.parameters():
+            p.requires_grad_(True)
 
-        # === Clear any old adapted model ===
-        if hasattr(self, "adapted_model"):
-            del self.adapted_model
-            torch.cuda.empty_cache()
-            gc.collect()
+        # ΔP init zero each round
+        deltaP = torch.zeros_like(
+            self.model.proxies, device=self.device, requires_grad=True
+        )
 
-        # === Use provided splits ===
+        # RecurrenceDatasetnew returns [train_loader, test_loader]
         support_loader, query_loader = self.dataset.dataloader(validation=False)
-        total_len = len(support_loader.dataset) + len(query_loader.dataset)
 
-        # === Inner loop: adapt model on support (train set) ===
-        self.adapted_model = copy.deepcopy(self.model).to(self.device)
+        support_loss = self.train_model_with_offsets(
+            self.adapted_backbone, support_loader, deltaP
+        )
+        query_grads, query_n, query_loss = self.compute_query_grads(
+            self.adapted_backbone, query_loader, deltaP
+        )
 
-        if self.epoch_fl <= 5:
-            loss = self.pre_train_model(
-                self.adapted_model,
-                support_loader,
-                alpha=self.pre_train_lr,
-                num_epochs=self.num_epochs,
-            )
-        elif self.epoch_fl <= 10:
-            loss = self.train_model(
-                self.adapted_model,
-                support_loader,
-                alpha=self.lr,
-                num_epochs=self.epochs,
-                only_markers=True,
-            )
-        else:
-            loss = self.train_model(
-                self.adapted_model,
-                support_loader,
-                alpha=self.lr,
-                num_epochs=self.epochs,
-                only_markers=False,
-            )
+        grads_file = f"hfmm_{self.client_name}"
+        np.savez(f"gradients_{grads_file}.npz", **query_grads)
 
-        # Save prototypes
-        # torch.save(self.criterion.state_dict(), prots_file_path)
-
-        # === Outer loop: compute query loss on adapted model ===
-        grads = self.compute_query_loss(self.adapted_model, query_loader)
-
-        # Define your target file path
-        grads_file_path = f"gradients_{self.client_name}.npz"
-        np.savez(grads_file_path, *grads)
-
-        # Free adapted model after training
-        del self.adapted_model, grads
-        torch.cuda.empty_cache()
-        gc.collect()
+        del deltaP
 
         self.log(
-            f"{self.client_name} - Fit() FedMeta client training finished",
+            f"{self.client_name} - HFMetaMetric client finished",
+            details="",
+            object="",
             object_id=self.id,
         )
 
         return (
-            self.model.get_parameters(),
-            total_len,
-            {"loss": loss, "grads_file": self.client_name},
+            self.get_parameters({}),
+            int(query_n),  # IMPORTANT: weight by query size
+            {
+                "support_loss": float(support_loss),
+                "query_loss": float(query_loss),
+                "grads_file": grads_file,
+            },
         )
 
     ################################
@@ -501,7 +492,7 @@ class RecurrenceExperiment(Experiment):
                 # match train style: direct indexing, no index_select
                 e1 = emb_gpu[idx1]
                 e2 = emb_gpu[idx2]
-                loss = self.criterion(e1, e2, y)
+                loss = self.loss_fn(e1, e2, y)
 
                 running_loss += loss.item()
                 total_batches += 1
@@ -534,7 +525,7 @@ class RecurrenceExperiment(Experiment):
         loss = 0.0
         model.to(self.device)
         model.eval()
-        self.criterion.train()
+        self.loss_fn.train()
 
         accuracy = MulticlassAccuracy(
             num_classes=self.num_classes, average=None  # "macro"
@@ -578,222 +569,41 @@ class RecurrenceExperiment(Experiment):
 
         return float(loss), acc, acc_per_class, prec, rec, f1_score, conf
 
-    def log_s_vectors_with_prototypes(
-        self, model, loss_model, data_loader, n_pairs=100, pca_components=2
-    ):
-        model.eval()
-        vectors_s = []
-        markers = []
-
-        with torch.no_grad():
-            for batch_data, batch_labels in data_loader:
-                batch_data = batch_data.to(self.device)
-                batch_labels = batch_labels.to(self.device)
-
-                # ==== NEW: use generate_pair_indices ====
-                idx1, idx2, y_pairs = self.generate_pair_indices(
-                    batch_labels, N=100, allow_repeat=True
-                )
-
-                # If no pairs possible, skip this batch
-                if idx1.numel() == 0:
-                    continue
-
-                # Extract pairs from the batch
-                pairs_1 = batch_data[idx1]
-                pairs_2 = batch_data[idx2]
-
-                # Compute embeddings
-                emb1 = model(pairs_1.float()).cpu().numpy()
-                emb2 = model(pairs_2.float()).cpu().numpy()
-
-                # Compute s = |emb1 - emb2|
-                s_vec = np.abs(emb1 - emb2)
-
-                vectors_s.append(s_vec)
-                markers.append(y_pairs.cpu().numpy())
-
-                # Stop when we collected enough
-                if sum(len(v) for v in vectors_s) >= n_pairs:
-                    break
-
-        # ====== Final concatenation ======
-        if len(vectors_s) == 0:
-            self.log("No S vectors generated (empty pairs).", object_id=self.id)
-            return None
-
-        vectors_s = np.concatenate(vectors_s, axis=0)[:n_pairs]
-        markers = np.concatenate(markers, axis=0)[:n_pairs]
-
-        # ====== PCA ======
-        pca = PCA(n_components=pca_components)
-        vectors_s_2d = pca.fit_transform(vectors_s)
-
-        # Prototypes
-        sim_proto = loss_model.similar_prototypes.detach().cpu().numpy()
-        dissim_proto = loss_model.dissimilar_prototypes.detach().cpu().numpy()
-
-        sim_proto_2d = pca.transform(sim_proto)
-        dissim_proto_2d = pca.transform(dissim_proto)
-
-        # ====== Log ======
-        self.log(
-            f"\n===== S-VECTORS WITH PROTOTYPES =====\n"
-            f"CLIENT: {self.client_name}\n"
-            f"S_2D_SHAPE: {vectors_s_2d.shape}\n"
-            f"MARKERS_SHAPE: {markers.shape}\n"
-            f"SIM_PROTO_2D_SHAPE: {sim_proto_2d.shape}\n"
-            f"DISSIM_PROTO_2D_SHAPE: {dissim_proto_2d.shape}\n\n"
-            f"S_2D =\n{np.array2string(vectors_s_2d, separator=', ')}\n\n"
-            f"MARKERS =\n{np.array2string(markers, separator=', ')}\n\n"
-            f"SIMILAR_PROTOTYPES_2D =\n{np.array2string(sim_proto_2d, separator=', ')}\n\n"
-            f"DISSIMILAR_PROTOTYPES_2D =\n{np.array2string(dissim_proto_2d, separator=', ')}\n",
-            object_id=self.id,
-        )
-
-        return vectors_s_2d, markers, sim_proto_2d, dissim_proto_2d
-
-    def log_2d_embedding_space(self, model, data_loader, n_samples=1000):
-        model.eval()
-        embeddings = []
-        labels = []
-
-        with torch.no_grad():
-            for batch_data, batch_labels in data_loader:
-                batch_data = batch_data.to(self.device)
-                emb = model(batch_data.float()).cpu().numpy()
-
-                embeddings.append(emb)
-                labels.append(batch_labels.numpy())
-
-                if len(embeddings) * batch_data.size(0) >= n_samples:
-                    break
-
-        embeddings = np.concatenate(embeddings, axis=0)[:n_samples]
-        labels = np.concatenate(labels, axis=0)[:n_samples]
-
-        pca = PCA(n_components=2)
-        emb2d = pca.fit_transform(embeddings)
-
-        self.log(
-            f"\n===== EMBEDDING SPACE =====\n"
-            f"CLIENT: {self.client_name}\n"
-            f"EMB_2D_SHAPE: {emb2d.shape}\n"
-            f"LABELS_SHAPE: {labels.shape}\n\n"
-            f"EMBEDDINGS_2D =\n{np.array2string(emb2d, separator=', ')}\n\n"
-            f"LABELS =\n{np.array2string(labels, separator=', ')}\n",
-            object_id=self.id,
-        )
-
-        return emb2d, labels
-
-    def validation_loop(self, data_loaders, alpha):
-        support_loader, query_loader = data_loaders
-
-        # === Inner loop: adapt model on support (train set) ===
-        self.adapted_model = copy.deepcopy(self.model).to(self.device)
-
-        if self.epoch_fl <= 5:
-            self.pre_train_model(
-                self.adapted_model,
-                support_loader,
-                alpha=self.pre_train_lr,
-                num_epochs=2,
-            )
-        elif self.epoch_fl <= 40:
-            self.train_model(
-                self.adapted_model,
-                support_loader,
-                alpha=self.lr,
-                num_epochs=2,
-                only_markers=True,
-            )
-        else:
-            self.train_model(
-                self.adapted_model,
-                support_loader,
-                alpha=self.lr,
-                num_epochs=2,
-                only_markers=False,
-            )
-
-        try:
-            if self.client_name == 0 and (
-                self.epoch_fl == 1 or self.epoch_fl % 25 == 0
-            ):
-                self.log(
-                    f"{self.client_name} - Logging visualization data for embeddings and S-vectors",
-                    object_id=self.id,
-                )
-
-                # Log embeddings PCA
-                self.log_2d_embedding_space(self.adapted_model, support_loader)
-
-                # Log S-vectors + prototypes PCA
-                self.log_s_vectors_with_prototypes(
-                    self.adapted_model, self.criterion, support_loader
-                )
-            else:
-                self.log(
-                    f"{self.client_name} - No Logging visualization",
-                    object_id=self.id,
-                )
-
-        except Exception as e:
-            self.log(
-                f"{self.client_name} - Visualization logging failed: {str(e)}",
-                object_id=self.id,
-            )
-
-        # ---- Evaluate adapted model on query set ----
-        loss_avg, acc, acc_per_class, prec, rec, f1, conf = self.test(
-            self.adapted_model, support_loader, query_loader
-        )
-
-        # build per-class accuracy mapping
-        acc_per_class_dict = {
-            f"TEST_ACC_CLASS_{i}": v for i, v in enumerate(acc_per_class)
-        }
-
-        torch.cuda.empty_cache()
-
-        return loss_avg, {
-            "TEST_ACC": acc,
-            "TEST_PREC": prec,
-            "Recall": rec,
-            "TEST_F1": f1,
-            # **acc_per_class_dict  # add per-class metrics to the output dictionary
-        }
-
     def evaluate(
         self, parameters: NDArrays, config: Dict[str, Scalar]
     ) -> Tuple[float, int, Dict]:
-        # alpha = config["alpha"]
-        return_dic = {}
-
         self.log(
-            f"{self.client_name} - Evaluate(): FedMeta Model evaluation started",
+            f"{self.client_name} - HFMetaMetric evaluation started",
+            details="",
             object="experiment_evaluate",
             object_id=self.id,
         )
+        self.epoch_fl = int(config.get("server_round", 0))
 
-        self.model.set_parameters(parameters)
+        self.set_parameters(parameters)
 
-        self.epoch_fl = config["server_round"]
-        loss, values_metrics_validation = self.validation_loop(
-            self.dataset.dataloader(validation=True), self.lr
-        )
-        values_metrics_validation["LOSS"] = loss
+        support_loader, query_loader = self.dataset.dataloader(validation=True)
 
-        self.log(
-            f"{self.client_name} - Measure: "
-            + "metrics."
-            + str(values_metrics_validation),
-            details="",
-            object="",
-            object_id=self.id,
+        adapted_backbone = copy.deepcopy(self.model.backbone).to(self.device)
+        deltaP = torch.zeros_like(
+            self.model.proxies, device=self.device, requires_grad=True
         )
 
+        _ = self.train_model_with_offsets(adapted_backbone, support_loader, deltaP)
+
+        # ---- Evaluate adapted model on query set ----
+        loss, acc, acc_per_class, prec, rec, f1, conf = self.test(
+            adapted_backbone, support_loader, query_loader
+        )
+
+        values_metrics_validation = {
+            "LOSS": float(loss),
+            "TEST_ACC": float(acc),
+            "TEST_PREC": float(prec),
+            "TEST_F1": float(f1),
+        }
+
+        return_dic = {}
         for name in values_metrics_validation:
             self.measures.log(
                 self,

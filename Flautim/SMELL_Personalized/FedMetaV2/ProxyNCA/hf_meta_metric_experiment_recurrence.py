@@ -87,13 +87,16 @@ class HFMetaMetricRecurrenceExperiment(Experiment):
                 y = y.to(self.device, non_blocking=True)
                 bs = y.size(0)
 
+                # COMO ISSO SERÁ USADO COM O SMELL??
                 proxies_eff = self.model.proxies + deltaP  # P_client
 
                 with autocast(
                     enabled=bool(self.cfg.use_amp and self.device.type == "cuda")
                 ):
-                    emb = extract_embeddings(adapted_backbone, x)
-                    loss_proxy = self.loss_fn(emb, proxies_eff, y)
+                    idx1, idx2, y = self.generate_pair_indices(y, N=200)
+                    emb1 = extract_embeddings(adapted_backbone, x[idx1])
+                    emb2 = extract_embeddings(adapted_backbone, x[idx2])
+                    loss_proxy = self.loss_fn(emb1, emb2, y)
                     loss_reg = self.cfg.lambda_offset * deltaP.pow(2).sum()
                     loss = loss_proxy + loss_reg
 
@@ -171,8 +174,10 @@ class HFMetaMetricRecurrenceExperiment(Experiment):
             with autocast(
                 enabled=bool(self.cfg.use_amp and self.device.type == "cuda")
             ):
-                emb = extract_embeddings(adapted_backbone, x)
-                loss = self.loss_fn(emb, proxies_eff, y)
+                idx1, idx2, y = self.generate_pair_indices(y, N=200)
+                emb1 = extract_embeddings(adapted_backbone, x[idx1])
+                emb2 = extract_embeddings(adapted_backbone, x[idx2])
+                loss = self.loss_fn(emb1, emb2, y)
 
             total_loss += float(loss.detach().cpu()) * bs
 
@@ -185,7 +190,7 @@ class HFMetaMetricRecurrenceExperiment(Experiment):
                     continue
                 grads_sum[name].add_(g.detach().cpu() * bs)
 
-            del x, y, emb, loss, grads
+            del x, y, emb1, emb2, idx1, idx2, loss, grads
 
         avg_grads = {
             k: (v / max(1, total_samples)).numpy() for k, v in grads_sum.items()
