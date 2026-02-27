@@ -34,10 +34,8 @@ from meta_metric_model import MetaMetricModel
 DATASET = "PAMAP"
 NUM_CHANNELS = 6
 BATCH_SIZE = 32
-NUM_ROUNDS = 100
+NUM_ROUNDS = 5
 NUM_EPOCHS = 5
-EMB_DIM = 64
-
 #########################
 # SIMULATION
 #########################
@@ -58,13 +56,13 @@ def generate_server_fn(context, eval_fn=None):
         )
 
         # Emb dim = 1280 no MobileNetV2
-        emb_dim = int(backbone.base_model.last_channel)
+        EMB_DIM = int(backbone.base_model.last_channel)
 
         net = MetaMetricModel(
             context,
             backbone=backbone,
             num_classes=NUM_CLASSES,
-            emb_dim=emb_dim,
+            emb_dim=EMB_DIM,
             suffix=0,
         )
         params = ndarrays_to_parameters(net.get_parameters())
@@ -99,13 +97,13 @@ def generate_client_fn(context, files, test_file):
             num_channels=NUM_CHANNELS,
             suffix=cid,
         )
-        emb_dim = int(backbone.base_model.last_channel)
+        EMB_DIM = int(backbone.base_model.last_channel)
 
         model = MetaMetricModel(
             context,
             backbone=backbone,
             num_classes=NUM_CLASSES,
-            emb_dim=emb_dim,
+            emb_dim=EMB_DIM,
             suffix=cid,
         )
 

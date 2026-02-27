@@ -1,5 +1,6 @@
 from collections import OrderedDict
-from typing import Callable, Dict, List, Tuple
+from typing import Dict, List, Tuple
+from dataclasses import dataclass
 import numpy as np
 import gc
 import os
@@ -33,6 +34,17 @@ from smell_loss import (
 )
 
 
+@dataclass
+class HFMetaMetricConfig:
+    alpha: float = 1e-4  # inner LR
+    inner_epochs: int = 1  # epochs over support loader
+    lambda_offset: float = 1e-3
+    temperature: float = 0.1
+    normalize_embeddings: bool = True
+    normalize_proxies: bool = True
+    use_amp: bool = True
+
+
 ###############################
 # EXPERIMENT
 ###############################
@@ -41,7 +53,7 @@ from smell_loss import (
 class RecurrenceExperiment(Experiment):
     def __init__(
         self,
-        model,
+        model: MetaMetricModel,
         dataset,
         context,
         client_name=0,
@@ -54,6 +66,7 @@ class RecurrenceExperiment(Experiment):
         num_classes=7,
         embedding_size=64,
         margin=1.0,
+        cfg: HFMetaMetricConfig = HFMetaMetricConfig(),
         # pre_train=False,
         **kwargs,
     ):
@@ -70,10 +83,11 @@ class RecurrenceExperiment(Experiment):
         self.lr_gamma = lr_gamma
         self.weight_decay = weight_decay
         self.client_name = client_name
+        self.cfg = cfg
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
-        self.adapted_model = copy.deepcopy(self.model).to(self.device)
+        self.adapted_backbone = None
 
         self.loss_fn = LearnablePrototypicalLossWithDiversityRegularization(
             embedding_dim=self.embedding_size,
@@ -400,7 +414,6 @@ class RecurrenceExperiment(Experiment):
         # Copy backbone for adaptation
         if self.adapted_backbone is not None:
             del self.adapted_backbone
-        self.adapted_backbone = copy.deepcopy(self.model.backbone).to(self.device)
 
         self.adapted_backbone = copy.deepcopy(self.model.backbone).to(self.device)
         for p in self.adapted_backbone.parameters():
@@ -477,7 +490,7 @@ class RecurrenceExperiment(Experiment):
                 batch_data = batch_data.to(self.device).float()
 
                 # compute embeddings on GPU once
-                emb_gpu = model(batch_data)  # [B, D]
+                emb_gpu = extract_embeddings(model, batch_data)  # [B, D]
                 emb_cpu = emb_gpu.detach().cpu().to(torch.float16)  # for KNN
 
                 preds = knn.predict(emb_cpu.numpy())
@@ -492,6 +505,10 @@ class RecurrenceExperiment(Experiment):
                 # match train style: direct indexing, no index_select
                 e1 = emb_gpu[idx1]
                 e2 = emb_gpu[idx2]
+                self.log(
+                    f"{self.client_name} - EMB1 SHAPE: {e1.shape}\nEMB2 SHAPE: {e2.shape}\nY SHAPE: {y.shape}",
+                    object_id=self.id,
+                )
                 loss = self.loss_fn(e1, e2, y)
 
                 running_loss += loss.item()
