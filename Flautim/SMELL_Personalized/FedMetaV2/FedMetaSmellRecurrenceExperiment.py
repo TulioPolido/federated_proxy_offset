@@ -232,46 +232,6 @@ class RecurrenceExperiment(Experiment):
         y = torch.tensor(y_list, dtype=torch.float32, device=device)
         return idx1, idx2, y
 
-    def pre_train_model(self, model, dataloader, num_epochs=1, alpha=0.001):
-
-        model.train()
-        self.pre_criterion.train()
-
-        # Combine parameters from model + pre_criterion
-        train_params = list(model.parameters()) + list(self.pre_criterion.parameters())
-
-        for epoch in range(num_epochs):
-            running_loss = 0.0
-
-            for batch_data, batch_labels in dataloader:
-                batch_data = batch_data.to(self.device)
-                batch_labels = batch_labels.to(self.device)
-
-                # Forward
-                embeddings = model(batch_data.float())
-                loss = self.pre_criterion(embeddings, batch_labels)
-
-                running_loss += loss.item()
-
-                # Compute gradients
-                grads = torch.autograd.grad(
-                    loss, train_params, create_graph=False, allow_unused=True
-                )
-
-                # Manual SGD update
-                with torch.no_grad():
-                    for p, g in zip(train_params, grads):
-                        if g is not None:
-                            p -= alpha * g
-
-                # Cleanup
-                del embeddings, loss, batch_data, batch_labels, grads
-                torch.cuda.empty_cache()
-
-            torch.cuda.synchronize()
-
-        return running_loss / max(1, len(dataloader))
-
     def train_model_with_offsets(
         self,
         adapted_backbone: nn.Module,
