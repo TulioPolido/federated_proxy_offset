@@ -247,8 +247,9 @@ class RecurrenceExperiment(Experiment):
                 y = y.to(self.device, non_blocking=True)
                 bs = y.size(0)
 
-                # COMO ISSO SERÁ USADO COM O SMELL??
-                proxies_eff = self.model.proxies + deltaP  # P_client
+                # Proxies eff similar + proxies eff dissimilar
+                proxies_eff_dis = self.loss_fn.dis + deltaP_dis  # P_client
+                proxies_eff_sim = self.loss_fn.sim + deltaP_sim_  # P_client
 
                 with autocast(
                     enabled=bool(self.cfg.use_amp and self.device.type == "cuda")
@@ -257,8 +258,8 @@ class RecurrenceExperiment(Experiment):
                     emb1 = extract_embeddings(adapted_backbone, x[idx1])
                     emb2 = extract_embeddings(adapted_backbone, x[idx2])
                     loss_proxy = self.loss_fn(emb1, emb2, y)
-                    loss_reg = 0  # self.cfg.lambda_offset * deltaP.pow(2).sum()
-                    loss = loss_proxy  # + loss_reg
+                    loss_reg = self.cfg.lambda_offset * (deltaP_dis.pow(2).sum() + deltaP_sim.pow(2).sum())
+                    loss = loss_proxy + loss_reg
 
                 total_loss += float(loss.detach().cpu()) * bs
                 total_samples += bs
@@ -266,14 +267,15 @@ class RecurrenceExperiment(Experiment):
                 params = list(adapted_backbone.parameters())
                 grads = torch.autograd.grad(
                     loss,
-                    params + [deltaP],
+                    params + [deltaP_sim] + [deltaP_dis],
                     create_graph=False,
                     retain_graph=False,
                     allow_unused=True,  # <-- FIX
                 )
 
-                grads_backbone = grads[:-1]
-                grad_delta = grads[-1]
+                grads_backbone = grads[:-2]
+                grad_delta_sim = grads[-2]
+                grad_delta_dis = grads[-1]
 
                 with torch.no_grad():
                     for p, g in zip(params, grads_backbone):
@@ -282,8 +284,11 @@ class RecurrenceExperiment(Experiment):
                         p.add_(g, alpha=-float(self.cfg.alpha))
 
                     # Se deltaP não apareceu no grafo por algum motivo, não atualiza
-                    if grad_delta is not None:
-                        deltaP.add_(grad_delta, alpha=-float(self.cfg.alpha))
+                    if grad_delta_sim is not None:
+                        deltaP_sim.add_(grad_delta_sim, alpha=-float(self.cfg.alpha))
+                        
+                    if grad_delta_dis is not None:
+                        deltaP_dis.add_(grad_delta_dis, alpha=-float(self.cfg.alpha))
 
                 del (
                     x,
