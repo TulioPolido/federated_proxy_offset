@@ -247,7 +247,7 @@ class RecurrenceExperiment(Experiment):
                 y = y.to(self.device, non_blocking=True)
                 bs = y.size(0)
 
-                # Proxies eff similar + proxies eff dissimilar
+                # Criar o deltaP_dis e deltaP_sim da mesma forma que o deltaP antigo.
                 proxies_eff_dis = self.loss_fn.dis + deltaP_dis  # P_client
                 proxies_eff_sim = self.loss_fn.sim + deltaP_sim_  # P_client
 
@@ -257,8 +257,12 @@ class RecurrenceExperiment(Experiment):
                     idx1, idx2, y = self.generate_pair_indices(y, N=200)
                     emb1 = extract_embeddings(adapted_backbone, x[idx1])
                     emb2 = extract_embeddings(adapted_backbone, x[idx2])
-                    loss_proxy = self.loss_fn(emb1, emb2, y)
-                    loss_reg = self.cfg.lambda_offset * (deltaP_dis.pow(2).sum() + deltaP_sim.pow(2).sum())
+                    loss_proxy = self.loss_fn(
+                        emb1, emb2, y, proxies_eff_sim, proxies_eff_dis
+                    )
+                    loss_reg = self.cfg.lambda_offset * (
+                        deltaP_dis.pow(2).sum() + deltaP_sim.pow(2).sum()
+                    )
                     loss = loss_proxy + loss_reg
 
                 total_loss += float(loss.detach().cpu()) * bs
@@ -286,7 +290,7 @@ class RecurrenceExperiment(Experiment):
                     # Se deltaP não apareceu no grafo por algum motivo, não atualiza
                     if grad_delta_sim is not None:
                         deltaP_sim.add_(grad_delta_sim, alpha=-float(self.cfg.alpha))
-                        
+
                     if grad_delta_dis is not None:
                         deltaP_dis.add_(grad_delta_dis, alpha=-float(self.cfg.alpha))
 

@@ -150,23 +150,23 @@ class LearnablePrototypicalLossWithDiversityRegularization(nn.Module):
 
         # Compute distances to all similar prototypes
         if proxie_eff_sim is None:
-          dist_to_similar_prototypes = torch.cdist(
-              s_ij, self.similar_prototypes.unsqueeze(0), p=2
-          ).squeeze(1)
+            dist_to_similar_prototypes = torch.cdist(
+                s_ij, self.similar_prototypes.unsqueeze(0), p=2
+            ).squeeze(1)
         else:
-          dist_to_similar_prototypes = torch.cdist(
-              s_ij, proxie_eff_sim.unsqueeze(0), p=2
-          ).squeeze(1) 
-          
-# Se os proxies dissimilares efetivos n forem nulos, eles sao utilizados no lugar dos proxies da loss
+            dist_to_similar_prototypes = torch.cdist(
+                s_ij, proxie_eff_sim.unsqueeze(0), p=2
+            ).squeeze(1)
+
+        # Se os proxies dissimilares efetivos n forem nulos, eles sao utilizados no lugar dos proxies da loss
         if proxie_eff_dis is None:
-          dist_to_dissimilar_prototypes = torch.cdist(
-              s_ij, self.dissimilar_prototypes.unsqueeze(0), p=2
-          ).squeeze(1)
+            dist_to_dissimilar_prototypes = torch.cdist(
+                s_ij, self.dissimilar_prototypes.unsqueeze(0), p=2
+            ).squeeze(1)
         else:
-          dist_to_dissimilar_prototypes = torch.cdist(
-              s_ij, proxie_eff_dis.unsqueeze(0), p=2
-          ).squeeze(1)
+            dist_to_dissimilar_prototypes = torch.cdist(
+                s_ij, proxie_eff_dis.unsqueeze(0), p=2
+            ).squeeze(1)
 
         # Compute similarity scores using the given formula
         similarity_similar = torch.pow(1 + torch.pow(dist_to_similar_prototypes, 2), -1)
