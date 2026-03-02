@@ -1,0 +1,219 @@
+=== Experiment Parameters ===
+measures 002
+
+=== Best Epoch Results per Experiment (averaged across users) ===
+
+Experiment A - User 0:
+Balanced Accuracy: 0.8746360017774697
+Precision: 0.8778593104278366
+F1 Score: 0.8718459719160633
+
+Experiment A - User 1:
+Balanced Accuracy: 0.8821845040313281
+Precision: 0.8914180624205797
+F1 Score: 0.8843071838019638
+
+Experiment A - User 2:
+Balanced Accuracy: 0.8738075688622191
+Precision: 0.878421995670775
+F1 Score: 0.8645136566759148
+
+Experiment A - User 3:
+Balanced Accuracy: 0.8313454275140846
+Precision: 0.8354086442980938
+F1 Score: 0.8317947880448131
+
+Experiment A - User 4:
+Balanced Accuracy: 0.8740782911773616
+Precision: 0.8748497894066617
+F1 Score: 0.867981594538352
+
+Experiment A - User 5:
+Balanced Accuracy: 0.8795174586111614
+Precision: 0.889133036292748
+F1 Score: 0.8797178896994584
+
+Experiment A - User 6:
+Balanced Accuracy: 0.8633217310606552
+Precision: 0.8768050092776352
+F1 Score: 0.8649373017768415
+
+Experiment A - User 7:
+Balanced Accuracy: 0.8722868971326709
+Precision: 0.8736229122953086
+F1 Score: 0.8649901927708229
+
+Experiment A - User 8:
+Balanced Accuracy: 0.8451585598094603
+Precision: 0.8475294654541359
+F1 Score: 0.8369649519620571
+
+Experiment A - User 9:
+Balanced Accuracy: 0.856723499336592
+Precision: 0.8586149751633347
+F1 Score: 0.8536291133899395
+
+Experiment A - User 10:
+Balanced Accuracy: 0.8700359305058049
+Precision: 0.8793543405344
+F1 Score: 0.858391340020237
+
+Experiment A - User 11:
+Balanced Accuracy: 0.8657431917683193
+Precision: 0.8672465238033126
+F1 Score: 0.8646872525894641
+
+Experiment A - User 12:
+Balanced Accuracy: 0.87670685618486
+Precision: 0.8776726069068179
+F1 Score: 0.8721350491080072
+
+Experiment A - User 13:
+Balanced Accuracy: 0.8648883168296603
+Precision: 0.8744720410733606
+F1 Score: 0.8572311727658201
+
+Experiment A - User 14:
+Balanced Accuracy: 0.8450005834532653
+Precision: 0.8480366280995615
+F1 Score: 0.8429563893094447
+
+Experiment A - User 15:
+Balanced Accuracy: 0.8662541396696751
+Precision: 0.8718198680020776
+F1 Score: 0.8644512974110395
+
+Experiment A - User 16:
+Balanced Accuracy: 0.8486362948792447
+Precision: 0.8624879477298907
+F1 Score: 0.846161239229551
+
+Experiment A - User 17:
+Balanced Accuracy: 0.8600476035000909
+Precision: 0.8712296931727014
+F1 Score: 0.851694663284798
+
+Experiment A - User 18:
+Balanced Accuracy: 0.8702959581422377
+Precision: 0.8717419463526599
+F1 Score: 0.862686797734737
+
+Experiment A - User 19:
+Balanced Accuracy: 0.9381572699259112
+Precision: 0.9369935998614592
+F1 Score: 0.9369027939363136
+
+Experiment A - User 20:
+Balanced Accuracy: 0.8555239272808995
+Precision: 0.8622075362715018
+F1 Score: 0.8547626665784144
+
+Experiment A - User 21:
+Balanced Accuracy: 0.8566367396395792
+Precision: 0.8587844461658367
+F1 Score: 0.8551430447615301
+
+Experiment A - User 22:
+Balanced Accuracy: 0.8577096335795623
+Precision: 0.8588657624524371
+F1 Score: 0.8533986904393105
+
+Experiment A - User 23:
+Balanced Accuracy: 0.8763906048701257
+Precision: 0.8745937453994039
+F1 Score: 0.8711545074709428
+
+Experiment A - User 24:
+Balanced Accuracy: 0.8651121035710089
+Precision: 0.8750771040766258
+F1 Score: 0.8560544413659399
+
+Experiment A - User 25:
+Balanced Accuracy: 0.9712628953976342
+Precision: 0.9707674504757724
+F1 Score: 0.9698679657641376
+
+Experiment A - User 26:
+Balanced Accuracy: 0.8703946462171208
+Precision: 0.8715698360494505
+F1 Score: 0.864145616944121
+
+Experiment A - User 27:
+Balanced Accuracy: 0.8759536946343124
+Precision: 0.8826706729256403
+F1 Score: 0.8656217122581513
+
+Experiment A - User 28:
+Balanced Accuracy: 0.8667610328655098
+Precision: 0.867479212937438
+F1 Score: 0.8612128055055562
+
+Experiment A - User 29:
+Balanced Accuracy: 0.8808988637787891
+Precision: 0.8935068892676831
+F1 Score: 0.8811876019995576
+
+Experiment A - User 30:
+Balanced Accuracy: 0.4446189067932426
+Precision: 0.5865549104030129
+F1 Score: 0.3609223483992936
+
+Experiment A - User 31:
+Balanced Accuracy: 0.8140541201033635
+Precision: 0.8206393209520887
+F1 Score: 0.8073549248462222
+
+Experiment A - User 32:
+Balanced Accuracy: 0.6319842007927893
+Precision: 0.7060281732831558
+F1 Score: 0.6300288682569548
+
+Experiment A - User 33:
+Balanced Accuracy: 0.5859965637156503
+Precision: 0.6760012486753121
+F1 Score: 0.5819385898576724
+
+Experiment A - User 34:
+Balanced Accuracy: 0.8071395270531759
+Precision: 0.8248798416348992
+F1 Score: 0.801713107082935
+
+Experiment A - User 35:
+Balanced Accuracy: 0.8556943506400895
+Precision: 0.8580797083607715
+F1 Score: 0.8490253391036406
+
+Experiment A - User 36:
+Balanced Accuracy: 0.8851791555132797
+Precision: 0.885954051041929
+F1 Score: 0.8773494528044842
+
+Experiment A - User 37:
+Balanced Accuracy: 0.8801184036875819
+Precision: 0.8851883625536446
+F1 Score: 0.8726460893531881
+
+Experiment A - User 38:
+Balanced Accuracy: 0.8712835696810179
+Precision: 0.8727529984683599
+F1 Score: 0.8643647334986356
+
+Experiment A - User 39:
+Balanced Accuracy: 0.8742642182846003
+Precision: 0.8770596664424254
+F1 Score: 0.868782618740202
+
+Experiment A - User 40:
+Balanced Accuracy: 0.8552587133932189
+Precision: 0.8755340330591097
+F1 Score: 0.8435770574663126
+
+Experiment A (Averaged across users):
+Balanced Accuracy: 0.8449
+Precision: 0.8573
+F1 Score: 0.8382
+
+=== Average Across Experiments (user-averaged) ===
+Average Balanced Accuracy: 0.8449
+Average Precision: 0.8573
+Average F1 Score: 0.8382
