@@ -10,7 +10,7 @@ from flwr.common import ndarrays_to_parameters
 from flautim.pytorch.common import run_federated, weighted_average
 
 import RecurrenceModel
-import FedMetaRecurrenceDatasetnew
+from fedmeta_recurrence_dataset import RecurrenceDataset
 
 from meta_metric_model import MetaMetricModel
 from hf_meta_metric_experiment_recurrence import (
@@ -24,7 +24,9 @@ DATASET = "PAMAP"
 NUM_CHANNELS = 6
 BATCH_SIZE = 32
 NUM_ROUNDS = 100
-INNER_EPOCHS = 1
+INNER_EPOCHS = 2
+ALPHA = 5e-4
+BETA = 1e-4
 
 
 def fit_config(server_round: int):
@@ -55,7 +57,7 @@ def generate_server_fn(context, eval_fn=None):
 
         strategy = HFMetaMetricStrategy(
             model=net,
-            lr_outer=1e-4,
+            lr_outer=BETA,
             initial_parameters=params,
             evaluate_metrics_aggregation_fn=weighted_average,
             fraction_fit=0.4,
@@ -92,20 +94,18 @@ def generate_client_fn(context, files, test_file):
             suffix=cid,
         )
 
-        dataset = FedMetaRecurrenceDatasetnew.RecurrenceDatasetnew(
+        dataset = RecurrenceDataset(
             train_file=train_file,
             test_file=test_file,
             augment_multiplier=2,
-            use_crop=False,
-            use_erase=False,
-            use_jitter=False,
             use_rotation=True,
+            support_ratio=0.5,
             num_workers=0,
             batch_size=BATCH_SIZE,
         )
 
         cfg = HFMetaMetricConfig(
-            alpha=1e-4,
+            alpha=ALPHA,
             inner_epochs=INNER_EPOCHS,
             lambda_offset=1e-3,
             temperature=0.1,

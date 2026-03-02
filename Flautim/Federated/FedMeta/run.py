@@ -1,184 +1,22 @@
-from collections import OrderedDict
-from typing import List, Optional, Tuple, Union
-from flautim.pytorch.common import run_federated, weighted_average
-import numpy as np
-import RecurrenceModel
-import FedMetaRecurrenceDatasetnew
-import FedMetaRecurrenceExperiment
-import flwr
-import torch
-from logging import INFO, ERROR
-from flwr.common.logger import log
-from flwr.common import (
-    EvaluateRes,
-    NDArrays,
-    Scalar,
-    ndarrays_to_parameters,
-    parameters_to_ndarrays,
-)
-from flwr.server.client_proxy import ClientProxy
-from flwr.server import ServerConfig, ServerAppComponents
-from flwr.server.strategy.aggregate import aggregate, weighted_loss_avg
-import flautim as fl
 import random
 
-DATASET = "WISDM"
+import flautim as fl
+import flwr
+import RecurrenceModel
+import torch
+from fedmeta_recurrence_dataset import RecurrenceDataset
+from fedmeta_recurrence_experiment import RecurrenceExperiment
+from fedmeta_strategy_v1 import FedMeta
+from flautim.pytorch.common import run_federated, weighted_average
+from flwr.common import ndarrays_to_parameters
+from flwr.server import ServerAppComponents, ServerConfig
+
+DATASET = "PAMAP"
 NUM_CHANNELS = 6
 BATCH_SIZE = 32
 NUM_ROUNDS = 100
 NUM_EPOCHS = 5
 EMB_DIM = 64
-
-def fedmeta_update_maml(
-    net: torch.nn.Module,
-    beta: float,
-    weights_results: NDArrays,
-    gradients_aggregated: NDArrays,
-    weight_decay: float,
-) -> NDArrays:
-    
-    params_dict = zip(net.state_dict().keys(), weights_results)
-    state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
-    net.load_state_dict(state_dict, strict=True)
-    
-    optimizer = torch.optim.Adam(
-        list(net.parameters()), lr=beta, weight_decay=weight_decay
-    )
-
-    # ---- ASSIGN GRADS ----
-    for (name, param), grad_ins in zip(net.named_parameters(), gradients_aggregated):
-        param.grad = torch.tensor(grad_ins, dtype=param.dtype)
-
-    # ---- OPTIMIZER STEP ----
-    optimizer.step()
-    optimizer.zero_grad()
-
-    weights_prime = [val.cpu().numpy() for _, val in net.state_dict().items()]
-    return weights_prime
-
-
-class FedMeta(flwr.server.strategy.FedAvg):
-    """Federated Meta-Learning Strategy (MAML-style)."""
-
-    def __init__(self, model, lr_inner=1e-4, lr_outer=1e-4, **kwargs):
-        super().__init__(**kwargs)  # forward other FedAvg args
-        self.net = model
-        self.beta = lr_outer
-        self.alpha = lr_inner
-
-    def aggregate_fit(self, server_round, results, failures):
-        for failure in failures:
-            log(ERROR, f"Fit Failure: {failure}")
-
-        if not results:
-            return None, {}
-
-        if not self.accept_failures and failures:
-            return None, {}
-
-        # Convert results
-        weights_results: List[Tuple[NDArrays, int]] = [
-            (parameters_to_ndarrays(fit_res.parameters), fit_res.num_examples)
-            for _, fit_res in results
-        ]
-
-        # Load grads from the files
-        grads_results: List[Tuple[NDArrays, int]] = []
-        for _, fit_res in results:
-            grads_file = fit_res.metrics.get("grads_file")
-            if grads_file is None:
-                raise ValueError("No grads_file in metrics for a client!")
-            
-            # Load the .npz file
-            log(INFO, f"Reading file for: {grads_file}")
-            file_path = f"gradients_{grads_file}.npz"
-
-            try:
-                with np.load(file_path) as data:
-                    grads = [data[key] for key in data]
-            except FileNotFoundError:
-                log(ERROR, f"File not found: {file_path}")
-                raise
-
-            grads_results.append((grads, fit_res.num_examples))
-
-        # Aggregate gradients
-        gradients_aggregated = aggregate(grads_results)
-
-        weights_prime = fedmeta_update_maml(
-            net=self.net,
-            beta=self.beta,
-            weights_results=weights_results[0][0],
-            gradients_aggregated=gradients_aggregated,
-            weight_decay=1e-4,
-        )
-        parameters_aggregated = ndarrays_to_parameters(weights_prime)
-
-        # Metrics
-        metrics_aggregated = {}
-        if self.fit_metrics_aggregation_fn:
-            fit_metrics = [(res.num_examples, res.metrics) for _, res in results]
-            metrics_aggregated = self.fit_metrics_aggregation_fn(fit_metrics)
-
-        return parameters_aggregated, metrics_aggregated
-
-    # def configure_evaluate(
-    #     self, server_round: int, parameters: Parameters, client_manager: ClientManager
-    # ) -> List[Tuple[ClientProxy, EvaluateIns]]:
-    #     """Configure the next round of evaluation."""
-    #     # Do not configure federated evaluation if fraction eval is 0.
-    #     if self.fraction_evaluate == 0.0:
-    #         return []
-
-    #     # Parameters and config
-    #     config = {}
-    #     if self.on_evaluate_config_fn is not None:
-    #         # Custom evaluation config function provided
-    #         config = self.on_evaluate_config_fn(server_round)
-    #     config["alpha"] = self.alpha
-    #     evaluate_ins = EvaluateIns(parameters, config)
-
-    #     # Sample clients
-    #     sample_size, min_num_clients = self.num_evaluation_clients(
-    #         client_manager.num_available()
-    #     )
-    #     clients = client_manager.sample(
-    #         num_clients=sample_size, min_num_clients=min_num_clients
-    #     )
-
-    #     # Return client/config pairs
-    #     return [(client, evaluate_ins) for client in clients]
-
-    def aggregate_evaluate(
-        self,
-        server_round: int,
-        results: list[tuple[ClientProxy, EvaluateRes]],
-        failures: list[Union[tuple[ClientProxy, EvaluateRes], BaseException]],
-    ) -> tuple[Optional[float], dict[str, Scalar]]:
-        """Aggregate evaluation losses using weighted average."""
-        for failure in failures:
-            log(ERROR, f"Evaluate Failure: {failure}")
-        if not results:
-            return None, {}
-        # Do not aggregate if there are failures and failures are not accepted
-        if not self.accept_failures and failures:
-            return None, {}
-
-        # Aggregate loss
-        loss_aggregated = weighted_loss_avg(
-            [
-                (evaluate_res.num_examples, evaluate_res.loss)
-                for _, evaluate_res in results
-            ]
-        )
-
-        # Aggregate custom metrics if aggregation fn was provided
-        metrics_aggregated = {}
-        if self.evaluate_metrics_aggregation_fn:
-            eval_metrics = [(res.num_examples, res.metrics) for _, res in results]
-            metrics_aggregated = self.evaluate_metrics_aggregation_fn(eval_metrics)
-
-        return loss_aggregated, metrics_aggregated
 
 
 #########################
@@ -226,18 +64,16 @@ def generate_client_fn(context, files, test_file):
             context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=cid
         )
 
-        dataset = FedMetaRecurrenceDatasetnew.RecurrenceDatasetnew(
+        dataset = RecurrenceDataset(
             train_file=file,
             test_file=test_file,
             augment_multiplier=2,
-            use_crop=False,
-            use_erase=False,
-            use_jitter=False,
             use_rotation=True,
+            support_ratio=0.4,
             num_workers=0,
         )
 
-        return FedMetaRecurrenceExperiment.RecurrenceExperiment(
+        return RecurrenceExperiment(
             model,
             dataset,
             context,
@@ -311,8 +147,8 @@ if __name__ == "__main__":
 
         elif DATASET == "WISDM":
             # Number of training clients
-            TOTAL_USERS = 10# 51
-            NUM_CLIENTS = 8 # 41
+            TOTAL_USERS = 10  # 51
+            NUM_CLIENTS = 8  # 41
             TEST_USERS = TOTAL_USERS - NUM_CLIENTS
             NUM_CLASSES = 5
             WINDOW_SIZE = 256
@@ -365,7 +201,7 @@ if __name__ == "__main__":
             server_fn=server_fn_callback,
             num_clients=NUM_CLIENTS,
             num_rounds=NUM_ROUNDS,
-            clients_resources = clients_resources
+            clients_resources=clients_resources,
         )
     except Exception as e:
         fl.log(f"Error in run.py: {e}")
