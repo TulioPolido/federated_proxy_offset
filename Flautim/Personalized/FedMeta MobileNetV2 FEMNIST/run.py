@@ -1,21 +1,21 @@
 import random
 
 import flautim as fl
-import flwr
 import RecurrenceModel
-import torch
-from fedmeta_recurrence_dataset import RecurrenceDataset
 from fedmeta_recurrence_experiment import RecurrenceExperiment
+from fedmeta_recurrence_dataset import RecurrenceDataset
 from fedmeta_strategy_v1 import FedMeta
 from flautim.pytorch.common import run_federated, weighted_average
 from flwr.common import ndarrays_to_parameters
 from flwr.server import ServerAppComponents, ServerConfig
 
-DATASET = "PAMAP"
-NUM_CHANNELS = 6
+from dataset import load_datasets
+
+DATASET = "FEMINIST"
+NUM_CHANNELS = 1
 BATCH_SIZE = 32
-NUM_ROUNDS = 100
-NUM_EPOCHS = 5
+NUM_ROUNDS = 10
+NUM_EPOCHS = 1
 EMB_DIM = 64
 
 
@@ -35,14 +35,15 @@ def generate_server_fn(context, eval_fn=None):
             context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=0
         )
         params = ndarrays_to_parameters(net.get_parameters())
+        
 
         strategy = FedMeta(
             model=net,
             lr_outer=1e-4,
             initial_parameters=params,
             evaluate_metrics_aggregation_fn=weighted_average,
-            fraction_fit=0.4,
-            fraction_evaluate=1.0,
+            fraction_fit=0.00001,
+            fraction_evaluate=0.00001,
             evaluate_fn=eval_fn,
             on_fit_config_fn=fit_config,
             on_evaluate_config_fn=fit_config,
@@ -54,42 +55,32 @@ def generate_server_fn(context, eval_fn=None):
     return create_server_fn
 
 
-def generate_client_fn(context, files, test_file):
+def generate_client_fn(context, trainloaders, valloaders):
     def create_client_fn(context_flwr):
 
         cid = int(context_flwr.node_config["partition-id"])
-        file = files[cid]
 
         model = RecurrenceModel.RecurrenceModel(
             context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=cid
         )
 
         dataset = RecurrenceDataset(
-            train_file=file,
-            test_file=test_file,
-            augment_multiplier=2,
-            use_rotation=True,
-            support_ratio=0.4,
-            num_workers=0,
+            num_workers=0
         )
 
         return RecurrenceExperiment(
-            model,
-            dataset,
             context,
-            client_name=cid,
-            lr=LEARNING_RATE,
-            pre_train_lr=PRE_TRAIN_LEARNING_RATE,
-            epochs=NUM_EPOCHS,
-            weight_decay=WEIGHT_DECAY,
-            lr_step=LEARNING_RATE_STEP,
-            lr_gamma=LEARNING_RATE_GAMMA,
+            model,
+            dataset, # Não usado. Placeholder.
+            trainloaders,
+            valloaders,
+            cid=cid
         ).to_client()
 
     return create_client_fn
 
 
-def evaluate_fn(context, test_data):
+def evaluate_fn(context):
     def fn(server_round, parameters, config):
         pass
 
@@ -105,91 +96,14 @@ if __name__ == "__main__":
         random.seed(seed)
         fl.log(f"Using random seed: {seed}")
 
-        if DATASET == "PAMAP":
-            # Number of training clients
-            TOTAL_USERS = 8
-            NUM_CLIENTS = 7
-            TEST_USERS = TOTAL_USERS - NUM_CLIENTS
-            NUM_CLASSES = 7
-            WINDOW_SIZE = 1024
-            STRIDE = 256
-            PRE_TRAIN_LEARNING_RATE = 1e-4
-            LEARNING_RATE = 1e-5
-            LEARNING_RATE_STEP = 3
-            LEARNING_RATE_GAMMA = 0.5
-            WEIGHT_DECAY = 6.7e-5
+        if DATASET == "FEMINIST":
+            NUM_CLASSES = 62
 
-            all_files = [i for i in range(1, TOTAL_USERS + 1)]
+            # partition dataset and get dataloaders
+            trainloaders, valloaders, _ = load_datasets(path="./data/")
+            NUM_CLIENTS = len(trainloaders["sup"])
 
-            # Shuffle and split
-            test_files = [7]
-            train_files = [i for i in all_files if i not in test_files]
-            # test_files = random.sample(all_files, TEST_USERS)
-            # train_files = [f for f in all_files if f not in test_files]
-            fl.log(f"Train users: {train_files}")
-            fl.log(f"Test users: {test_files}")
-
-            # Load training client files
-            files = [
-                torch.load(
-                    f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
-                )
-                for i in train_files
-            ]
-
-            # Load and combine test files
-            test_files = [
-                torch.load(
-                    f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
-                )
-                for i in test_files
-            ]
-
-        elif DATASET == "WISDM":
-            # Number of training clients
-            TOTAL_USERS = 10  # 51
-            NUM_CLIENTS = 8  # 41
-            TEST_USERS = TOTAL_USERS - NUM_CLIENTS
-            NUM_CLASSES = 5
-            WINDOW_SIZE = 256
-            STRIDE = 64
-            PRE_TRAIN_LEARNING_RATE = 5e-5
-            LEARNING_RATE = 1e-5
-            LEARNING_RATE_STEP = 3
-            LEARNING_RATE_GAMMA = 0.5
-            WEIGHT_DECAY = 1.1e-5
-
-            all_files = [i for i in range(1, TOTAL_USERS + 1) if i not in [38, 41, 44]]
-
-            # Shuffle and split
-            test_files = random.sample(all_files, TEST_USERS)
-            train_files = [f for f in all_files if f not in test_files]
-            fl.log(f"Train users: {train_files}")
-            fl.log(f"Test users: {test_files}")
-
-            # Load training client files
-            files = [
-                torch.load(
-                    f"./data/WISDM_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
-                )
-                for i in train_files
-            ]
-
-            # Load and combine test files
-            test_files = [
-                torch.load(
-                    f"./data/WISDM_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
-                )
-                for i in test_files
-            ]
-
-        combined_test_data = {
-            "data": torch.cat([f["data"] for f in test_files], dim=0),
-            "labels": torch.cat([f["labels"] for f in test_files], dim=0),
-        }
-
-        client_fn_callback = generate_client_fn(context, files, combined_test_data)
-        evaluate_fn_callback = evaluate_fn(context, combined_test_data)
+        client_fn_callback = generate_client_fn(context, trainloaders, valloaders)
         server_fn_callback = generate_server_fn(context, eval_fn=None)
 
         clients_resources = {"num_cpus": 1, "num_gpus": 0.15}

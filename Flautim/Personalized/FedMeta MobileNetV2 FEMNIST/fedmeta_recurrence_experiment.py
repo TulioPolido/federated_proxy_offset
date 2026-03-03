@@ -13,55 +13,51 @@ from sklearn.metrics import (
     precision_score,
 )
 from torch.cuda.amp import autocast
-from torch.optim.lr_scheduler import StepLR
 
 
 class RecurrenceExperiment(Experiment):
     def __init__(
         self,
-        model,
-        dataset,
         context,
-        client_name=0,
-        lr=0.001,
-        pre_train_lr=0.001,
-        epochs=10,
-        weight_decay=1e-4,
-        lr_step=3,
-        lr_gamma=0.5,
+        net,
+        dataset,
+        trainloaders,
+        valloaders,
+        cid=0,
+        learning_rate=0.001,
+        num_epochs=1,
+        gradient_step=5,
         num_classes=7,
         **kwargs,
     ):
-        super(RecurrenceExperiment, self).__init__(model, dataset, context, **kwargs)
+        super(RecurrenceExperiment, self).__init__(net, dataset, context, **kwargs)
+        self.net = net
+        self.trainloaders = trainloaders
+        self.valloaders = valloaders
+        self.cid = int(cid)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.num_epochs = num_epochs
+        self.learning_rate = learning_rate
+        self.gradient_step = gradient_step
+        self.num_classes = num_classes
+
         self.criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
         self.optimizer = torch.optim.Adam(
-            self.model.parameters(), lr=lr, weight_decay=weight_decay
+            self.net.parameters(), lr=learning_rate
         )
 
-        self.epochs = epochs
-        self.num_classes = num_classes
-        self.lr = lr
-        self.pre_train_lr = pre_train_lr
-        self.lr_step = lr_step
-        self.lr_gamma = lr_gamma
-        self.weight_decay = weight_decay
-        self.client_name = client_name
-
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model.to(self.device)
-        self.adapted_model = copy.deepcopy(self.model).to(self.device)
-
-        self.scheduler = StepLR(self.optimizer, step_size=lr_step, gamma=lr_gamma)
+        self.net.to(self.device)
+        self.adapted_model = copy.deepcopy(self.net).to(self.device)
 
     def get_parameters(self, config: Dict[str, Scalar]) -> NDArrays:
         """Return the parameters of the current net."""
-        return [val.cpu().numpy() for _, val in self.model.state_dict().items()]
+        return [val.cpu().numpy() for _, val in self.net.state_dict().items()]
 
     def set_parameters(self, parameters: NDArrays) -> None:
         """Change the parameters of the model using the given ones."""
-        params_dict = zip(self.model.state_dict().keys(), parameters)
+        params_dict = zip(self.net.state_dict().keys(), parameters)
         state_dict = OrderedDict({k: torch.Tensor(v) for k, v in params_dict})
-        self.model.load_state_dict(state_dict, strict=True)
+        self.net.load_state_dict(state_dict, strict=True)
 
     ################################
     # TRAINING FUNCTIONS ######
@@ -202,7 +198,7 @@ class RecurrenceExperiment(Experiment):
         torch.cuda.synchronize()  # Força CPU a aguardar operações CUDA
 
         self.log(
-            f"{self.client_name} - FedMeta client training started",
+            f"{self.cid} - FedMeta client training started",
             details="",
             object="",
             object_id=self.id,
@@ -210,7 +206,7 @@ class RecurrenceExperiment(Experiment):
         self.epoch_fl = config["server_round"]
 
         # === Load global model ===
-        self.model.set_parameters(parameters)  # Salva os parâmetros recebidos no modelo
+        self.net.set_parameters(parameters)  # Salva os parâmetros recebidos no modelo
 
         # === Clear any old adapted model ===
         if hasattr(self, "adapted_model"):  # Se existir modelo adaptado
@@ -219,27 +215,26 @@ class RecurrenceExperiment(Experiment):
             gc.collect()  # Força coleta de lixo
 
         # === Reload dataloaders ===
-        support_loader, query_loader = self.dataset.dataloader(
-            validation=False
-        )  # Recebe os dados de treino e teste
+        support_loader = self.trainloaders["sup"][self.cid]
+        query_loader = self.trainloaders["qry"][self.cid]
         total_len = len(support_loader.dataset) + len(
             query_loader.dataset
         )  # Salva o tamanho total dos dados somados
 
         # === Create fresh model for adaptation ===
-        self.adapted_model = copy.deepcopy(self.model).to(
+        self.adapted_model = copy.deepcopy(self.net).to(
             self.device
         )  # Cria um modelo adaptado (uma cópia do modelo atual)
 
         loss = self.train_model(
-            self.adapted_model, support_loader, self.lr, self.epochs
+            self.adapted_model, support_loader, self.learning_rate, self.num_epochs
         )  # Treina o modelo adaptado com dados de treinamento
 
         grads = self.compute_query_loss(
             self.adapted_model, query_loader
         )  # Calcula o gradiente do modelo adaptado com os dados de teste
 
-        file_path = f"gradients_{self.client_name}.npz"  # Cria um nome para o arquivo de gradientes
+        file_path = f"gradients_{self.cid}.npz"  # Cria um nome para o arquivo de gradientes
         np.savez(file_path, *grads)  # Salva os gradientes desse cliente no arquivo
 
         # Free adapted model after training
@@ -248,16 +243,16 @@ class RecurrenceExperiment(Experiment):
         gc.collect()  # Força coleta de lixo
 
         self.log(
-            f"{self.client_name} - FedMeta client finished",
+            f"{self.cid} - FedMeta client finished",
             details="",
             object="",
             object_id=self.id,
         )
 
         return (
-            self.model.get_parameters(),
+            self.net.get_parameters(),
             total_len,
-            {"loss": loss, "grads_file": self.client_name},
+            {"loss": loss, "grads_file": self.cid},
         )  # Retorna os parâmetros originais do modelo, o tamanho total dos dados, a loss e o nome do arquivo de gradientes
 
     ################################
@@ -268,7 +263,7 @@ class RecurrenceExperiment(Experiment):
         support_loader, query_loader = data_loaders
 
         # ---- Inner loop adaptation ----
-        self.adapted_model = copy.deepcopy(self.model).to(self.device)
+        self.adapted_model = copy.deepcopy(self.net).to(self.device)
         self.train_model(self.adapted_model, support_loader, alpha, 2)
 
         self.adapted_model.eval()
@@ -309,17 +304,17 @@ class RecurrenceExperiment(Experiment):
         return_dic = {}
         try:
             self.log(
-                f"{self.client_name} - FedMeta Model evaluation started",
+                f"{self.cid} - FedMeta Model evaluation started",
                 details="",
                 object="experiment_evaluate",
                 object_id=self.id,
             )
 
-            self.model.set_parameters(parameters)
+            self.net.set_parameters(parameters)
             self.epoch_fl = config["server_round"]
 
             loss, values_metrics_validation = self.validation_loop(
-                self.dataset.dataloader(validation=True), self.lr
+                self.dataset.dataloader(validation=True), self.learning_rate
             )
             values_metrics_validation["LOSS"] = loss
 
@@ -333,9 +328,9 @@ class RecurrenceExperiment(Experiment):
                 )
                 return_dic[name] = float(values_metrics_validation[name])
 
-            self.model.save()
+            self.net.save()
             self.log(
-                f"{self.client_name} - evaluation finished",
+                f"{self.cid} - evaluation finished",
                 details="",
                 object="experiment_evaluate",
                 object_id=self.id,
@@ -349,7 +344,7 @@ class RecurrenceExperiment(Experiment):
             )
         except Exception as e:
             self.log(
-                f"{self.client_name} - ERROR in evaluate(): {e}",
+                f"{self.cid} - ERROR in evaluate(): {e}",
                 details="",
                 object="experiment_evaluate",
                 object_id=self.id,
