@@ -13,7 +13,7 @@ from dataset import load_datasets
 
 DATASET = "FEMINIST"
 NUM_CHANNELS = 1
-BATCH_SIZE = 32
+BATCH_SIZE = 25
 NUM_ROUNDS = 10
 NUM_EPOCHS = 1
 EMB_DIM = 64
@@ -102,6 +102,16 @@ if __name__ == "__main__":
             # partition dataset and get dataloaders
             trainloaders, valloaders, _ = load_datasets(path="./data/")
             NUM_CLIENTS = len(trainloaders["sup"])
+            fl.log(f"len(trainloaders['sup']): {len(trainloaders["sup"])}")
+            fl.log(f"len(trainloaders['qry']): {len(trainloaders["qry"])}")
+            fl.log(f"len(valloaders['sup']): {len(valloaders["sup"])}")
+            fl.log(f"len(valloaders['qry']): {len(valloaders["qry"])}")
+
+            batch = next(iter(trainloaders["sup"][1]))
+            data, labels = batch
+
+            fl.log("Batch input shape:", data.shape)
+            fl.log("Batch labels shape:", labels.shape)
 
         client_fn_callback = generate_client_fn(context, trainloaders, valloaders)
         server_fn_callback = generate_server_fn(context, eval_fn=None)

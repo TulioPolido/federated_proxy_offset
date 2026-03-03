@@ -54,9 +54,27 @@ class RecurrenceExperiment(Experiment):
         return [val.cpu().numpy() for _, val in self.net.state_dict().items()]
 
     def set_parameters(self, parameters: NDArrays) -> None:
-        """Change the parameters of the model using the given ones."""
-        params_dict = zip(self.net.state_dict().keys(), parameters)
-        state_dict = OrderedDict({k: torch.Tensor(v) for k, v in params_dict})
+        model_keys = list(self.net.state_dict().keys())
+        
+        # self.log(f"{self.cid} ------ DEBUG SET_PARAMETERS ------", object_id=self.id)
+        # self.log(f"{self.cid} Model param count: {len(model_keys)}", object_id=self.id)
+        # self.log(f"{self.cid} Received param count: {len(parameters)}", object_id=self.id)
+
+        if len(model_keys) != len(parameters):
+            self.log(f"{self.cid} ❌ PARAM COUNT MISMATCH", object_id=self.id)
+
+        for i, (k, v) in enumerate(zip(model_keys, parameters)):
+            # self.log(f"{self.cid} [{i}] {k}", object_id=self.id)
+            # self.log(f"{self.cid}   expected shape: {tuple(self.net.state_dict()[k].shape)}", object_id=self.id)
+            # self.log(f"{self.cid}   received shape: {np.shape(v)}", object_id=self.id)
+
+            if np.size(v) == 0:
+                self.log("{self.cid}   ❌ EMPTY PARAMETER DETECTED", object_id=self.id)
+
+        self.log(f"{self.cid} ----------------------------------", object_id=self.id)
+
+        params_dict = zip(model_keys, parameters)
+        state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
         self.net.load_state_dict(state_dict, strict=True)
 
     ################################
@@ -76,8 +94,8 @@ class RecurrenceExperiment(Experiment):
                 labels,
             ) in train_loader:  # Para cada par de dados e labels no trainloader
                 data, labels = (
-                    data.to(self.device),
-                    labels.to(self.device),
+                    data.float().to(self.device),
+                    labels.long().to(self.device),
                 )  # Passa os dados e labels para a GPU
 
                 # Mixed precision forward
@@ -136,8 +154,8 @@ class RecurrenceExperiment(Experiment):
 
         for data, labels in query_loader:  # Para cada par dado-label no quaryloader
             data, labels = (
-                data.to(self.device),
-                labels.to(self.device),
+                data.float().to(self.device),
+                labels.long().to(self.device),
             )  # Carrega os dados e labels na GPU
             batch_size = labels.size(0)  # Inicializa o tamanho do batch
             total_samples += batch_size  # Soma o tamanho do batch ao total de samples
@@ -206,7 +224,7 @@ class RecurrenceExperiment(Experiment):
         self.epoch_fl = config["server_round"]
 
         # === Load global model ===
-        self.net.set_parameters(parameters)  # Salva os parâmetros recebidos no modelo
+        self.set_parameters(parameters)  # Salva os parâmetros recebidos no modelo
 
         # === Clear any old adapted model ===
         if hasattr(self, "adapted_model"):  # Se existir modelo adaptado
@@ -250,7 +268,7 @@ class RecurrenceExperiment(Experiment):
         )
 
         return (
-            self.net.get_parameters(),
+            self.get_parameters({}),
             total_len,
             {"loss": loss, "grads_file": self.cid},
         )  # Retorna os parâmetros originais do modelo, o tamanho total dos dados, a loss e o nome do arquivo de gradientes
@@ -259,8 +277,14 @@ class RecurrenceExperiment(Experiment):
     # TESTING FUNCTIONS ######
     ################################
 
-    def validation_loop(self, data_loaders, alpha):
-        support_loader, query_loader = data_loaders
+    def validation_loop(self, alpha):
+        # Necessario para o teste com o dataset FEMNIST pq o número de clientes de teste é muito menor.
+        test_id = self.cid
+        if test_id > len(self.valloaders["sup"]):
+            test_id = self.cid % len(self.valloaders["sup"])
+
+        support_loader = self.valloaders["sup"][test_id]
+        query_loader = self.valloaders["qry"][test_id]
 
         # ---- Inner loop adaptation ----
         self.adapted_model = copy.deepcopy(self.net).to(self.device)
@@ -272,8 +296,8 @@ class RecurrenceExperiment(Experiment):
 
         with torch.no_grad():
             for X, y in query_loader:
-                X = X.to(self.device)
-                y = y.to(self.device)
+                X = X.float().to(self.device)
+                y = y.long().to(self.device)
 
                 outputs = self.adapted_model(X)
                 total_loss += self.criterion(outputs, y).item()
@@ -310,11 +334,13 @@ class RecurrenceExperiment(Experiment):
                 object_id=self.id,
             )
 
-            self.net.set_parameters(parameters)
+            print(f"EVALUATE PARAMETERS LEN: {len(parameters)}")
+            print(f"EVALUATE PARAMETER 0: {parameters[0]}")
+            self.set_parameters(parameters)
             self.epoch_fl = config["server_round"]
 
             loss, values_metrics_validation = self.validation_loop(
-                self.dataset.dataloader(validation=True), self.learning_rate
+                self.learning_rate
             )
             values_metrics_validation["LOSS"] = loss
 
