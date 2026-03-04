@@ -14,7 +14,7 @@ from dataset import load_datasets
 DATASET = "FEMINIST"
 NUM_CHANNELS = 1
 BATCH_SIZE = 25
-NUM_ROUNDS = 500
+NUM_ROUNDS = 2000
 NUM_EPOCHS = 1
 EMB_DIM = 64
 
@@ -39,7 +39,7 @@ def generate_server_fn(context, eval_fn=None):
 
         strategy = FedMeta(
             model=net,
-            lr_outer=5e-5,
+            lr_outer=1e-4,
             initial_parameters=params,
             evaluate_metrics_aggregation_fn=weighted_average,
             fraction_fit=0.005,

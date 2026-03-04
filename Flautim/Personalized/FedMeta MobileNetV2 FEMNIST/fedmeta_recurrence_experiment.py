@@ -24,7 +24,7 @@ class RecurrenceExperiment(Experiment):
         trainloaders,
         valloaders,
         cid=0,
-        learning_rate=0.0005,
+        learning_rate=1e-3,
         num_epochs=1,
         gradient_step=5,
         num_classes=7,
@@ -41,9 +41,9 @@ class RecurrenceExperiment(Experiment):
         self.gradient_step = gradient_step
         self.num_classes = num_classes
 
-        self.criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
+        self.criterion = torch.nn.CrossEntropyLoss()
         self.optimizer = torch.optim.Adam(
-            self.net.parameters(), lr=learning_rate
+            self.net.parameters(), lr=learning_rate, weight_decay=0.001
         )
 
         self.net.to(self.device)
