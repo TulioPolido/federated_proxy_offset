@@ -1,7 +1,7 @@
 import random
 
 import flautim as fl
-import RecurrenceModel
+import FemnistNetwork
 from fedmeta_recurrence_experiment import RecurrenceExperiment
 from fedmeta_recurrence_dataset import RecurrenceDataset
 from fedmeta_strategy_v1 import FedMeta
@@ -14,7 +14,7 @@ from dataset import load_datasets
 DATASET = "FEMINIST"
 NUM_CHANNELS = 1
 BATCH_SIZE = 25
-NUM_ROUNDS = 10
+NUM_ROUNDS = 500
 NUM_EPOCHS = 1
 EMB_DIM = 64
 
@@ -31,19 +31,19 @@ def fit_config(server_round):
 def generate_server_fn(context, eval_fn=None):
     def create_server_fn(context_flwr):
 
-        net = RecurrenceModel.RecurrenceModel(
-            context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=0
+        net = FemnistNetwork.FemnistNetwork(
+            context, suffix=0
         )
         params = ndarrays_to_parameters(net.get_parameters())
         
 
         strategy = FedMeta(
             model=net,
-            lr_outer=1e-4,
+            lr_outer=5e-5,
             initial_parameters=params,
             evaluate_metrics_aggregation_fn=weighted_average,
-            fraction_fit=0.00001,
-            fraction_evaluate=0.00001,
+            fraction_fit=0.005,
+            fraction_evaluate=0.005,
             evaluate_fn=eval_fn,
             on_fit_config_fn=fit_config,
             on_evaluate_config_fn=fit_config,
@@ -60,8 +60,8 @@ def generate_client_fn(context, trainloaders, valloaders):
 
         cid = int(context_flwr.node_config["partition-id"])
 
-        model = RecurrenceModel.RecurrenceModel(
-            context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=cid
+        model = FemnistNetwork.FemnistNetwork(
+            context, suffix=cid
         )
 
         dataset = RecurrenceDataset(
@@ -102,16 +102,6 @@ if __name__ == "__main__":
             # partition dataset and get dataloaders
             trainloaders, valloaders, _ = load_datasets(path="./data/")
             NUM_CLIENTS = len(trainloaders["sup"])
-            fl.log(f"len(trainloaders['sup']): {len(trainloaders["sup"])}")
-            fl.log(f"len(trainloaders['qry']): {len(trainloaders["qry"])}")
-            fl.log(f"len(valloaders['sup']): {len(valloaders["sup"])}")
-            fl.log(f"len(valloaders['qry']): {len(valloaders["qry"])}")
-
-            batch = next(iter(trainloaders["sup"][1]))
-            data, labels = batch
-
-            fl.log("Batch input shape:", data.shape)
-            fl.log("Batch labels shape:", labels.shape)
 
         client_fn_callback = generate_client_fn(context, trainloaders, valloaders)
         server_fn_callback = generate_server_fn(context, eval_fn=None)
@@ -129,3 +119,4 @@ if __name__ == "__main__":
         )
     except Exception as e:
         fl.log(f"Error in run.py: {e}")
+        raise

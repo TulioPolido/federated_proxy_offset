@@ -24,7 +24,7 @@ class RecurrenceExperiment(Experiment):
         trainloaders,
         valloaders,
         cid=0,
-        learning_rate=0.001,
+        learning_rate=0.0005,
         num_epochs=1,
         gradient_step=5,
         num_classes=7,
@@ -55,19 +55,11 @@ class RecurrenceExperiment(Experiment):
 
     def set_parameters(self, parameters: NDArrays) -> None:
         model_keys = list(self.net.state_dict().keys())
-        
-        # self.log(f"{self.cid} ------ DEBUG SET_PARAMETERS ------", object_id=self.id)
-        # self.log(f"{self.cid} Model param count: {len(model_keys)}", object_id=self.id)
-        # self.log(f"{self.cid} Received param count: {len(parameters)}", object_id=self.id)
 
         if len(model_keys) != len(parameters):
             self.log(f"{self.cid} ❌ PARAM COUNT MISMATCH", object_id=self.id)
 
         for i, (k, v) in enumerate(zip(model_keys, parameters)):
-            # self.log(f"{self.cid} [{i}] {k}", object_id=self.id)
-            # self.log(f"{self.cid}   expected shape: {tuple(self.net.state_dict()[k].shape)}", object_id=self.id)
-            # self.log(f"{self.cid}   received shape: {np.shape(v)}", object_id=self.id)
-
             if np.size(v) == 0:
                 self.log("{self.cid}   ❌ EMPTY PARAMETER DETECTED", object_id=self.id)
 
@@ -83,6 +75,7 @@ class RecurrenceExperiment(Experiment):
 
     def train_model(self, model, train_loader, alpha, num_epochs=1):
         """Train with minimal memory footprint."""
+
         for _ in range(num_epochs):  # Para cada epoca
             total_loss, total_samples = (
                 0.0,
@@ -206,7 +199,7 @@ class RecurrenceExperiment(Experiment):
         torch.cuda.empty_cache()  # Limpa cache da GPU
         torch.cuda.synchronize()  # forca a CPU a aguardar as operacoes CUDA
 
-        return grads_np  # retorna os gradientes como numpy
+        return grads_np, len(query_loader.dataset)  # retorna os gradientes como numpy
 
     def fit(
         self, parameters: NDArrays, config: Dict[str, Scalar]
@@ -235,9 +228,6 @@ class RecurrenceExperiment(Experiment):
         # === Reload dataloaders ===
         support_loader = self.trainloaders["sup"][self.cid]
         query_loader = self.trainloaders["qry"][self.cid]
-        total_len = len(support_loader.dataset) + len(
-            query_loader.dataset
-        )  # Salva o tamanho total dos dados somados
 
         # === Create fresh model for adaptation ===
         self.adapted_model = copy.deepcopy(self.net).to(
@@ -248,7 +238,7 @@ class RecurrenceExperiment(Experiment):
             self.adapted_model, support_loader, self.learning_rate, self.num_epochs
         )  # Treina o modelo adaptado com dados de treinamento
 
-        grads = self.compute_query_loss(
+        grads, num_examples = self.compute_query_loss(
             self.adapted_model, query_loader
         )  # Calcula o gradiente do modelo adaptado com os dados de teste
 
@@ -269,7 +259,7 @@ class RecurrenceExperiment(Experiment):
 
         return (
             self.get_parameters({}),
-            total_len,
+            num_examples,
             {"loss": loss, "grads_file": self.cid},
         )  # Retorna os parâmetros originais do modelo, o tamanho total dos dados, a loss e o nome do arquivo de gradientes
 
@@ -309,6 +299,7 @@ class RecurrenceExperiment(Experiment):
                 torch.cuda.empty_cache()
 
         loss_avg = total_loss / len(query_loader)
+        num_examples = len(query_loader.dataset)
         balanced_acc = balanced_accuracy_score(all_labels, all_preds)
         precision = precision_score(
             all_labels, all_preds, average="weighted", zero_division=0
@@ -316,7 +307,7 @@ class RecurrenceExperiment(Experiment):
         f1 = f1_score(all_labels, all_preds, average="weighted")
 
         torch.cuda.empty_cache()
-        return loss_avg, {
+        return loss_avg, num_examples, {
             "TEST_ACC": balanced_acc,
             "TEST_PREC": precision,
             "TEST_F1": f1,
@@ -326,53 +317,43 @@ class RecurrenceExperiment(Experiment):
         self, parameters: NDArrays, config: Dict[str, Scalar]
     ) -> Tuple[float, int, Dict]:
         return_dic = {}
-        try:
-            self.log(
-                f"{self.cid} - FedMeta Model evaluation started",
-                details="",
-                object="experiment_evaluate",
-                object_id=self.id,
-            )
 
-            print(f"EVALUATE PARAMETERS LEN: {len(parameters)}")
-            print(f"EVALUATE PARAMETER 0: {parameters[0]}")
-            self.set_parameters(parameters)
-            self.epoch_fl = config["server_round"]
+        self.log(
+            f"{self.cid} - FedMeta Model evaluation started",
+            details="",
+            object="experiment_evaluate",
+            object_id=self.id,
+        )
 
-            loss, values_metrics_validation = self.validation_loop(
-                self.learning_rate
-            )
-            values_metrics_validation["LOSS"] = loss
+        self.set_parameters(parameters)
+        self.epoch_fl = config["server_round"]
 
-            for name in values_metrics_validation:
-                self.measures.log(
-                    self,
-                    name,
-                    values_metrics_validation[name],
-                    validation=True,
-                    epoch=self.epoch_fl,
-                )
-                return_dic[name] = float(values_metrics_validation[name])
+        loss, num_examples, values_metrics_validation = self.validation_loop(
+            self.learning_rate
+        )
+        values_metrics_validation["LOSS"] = loss
 
-            self.net.save()
-            self.log(
-                f"{self.cid} - evaluation finished",
-                details="",
-                object="experiment_evaluate",
-                object_id=self.id,
+        for name in values_metrics_validation:
+            self.measures.log(
+                self,
+                name,
+                values_metrics_validation[name],
+                validation=True,
+                epoch=self.epoch_fl,
             )
+            return_dic[name] = float(values_metrics_validation[name])
 
-            torch.cuda.empty_cache()
-            return (
-                float(loss),
-                len(self.dataset.dataloader(validation=True)),
-                return_dic,
-            )
-        except Exception as e:
-            self.log(
-                f"{self.cid} - ERROR in evaluate(): {e}",
-                details="",
-                object="experiment_evaluate",
-                object_id=self.id,
-            )
-            raise
+        self.net.save()
+        self.log(
+            f"{self.cid} - evaluation finished",
+            details="",
+            object="experiment_evaluate",
+            object_id=self.id,
+        )
+
+        torch.cuda.empty_cache()
+        return (
+            float(loss),
+            num_examples,
+            return_dic,
+        )
