@@ -41,7 +41,7 @@ class RecurrenceExperiment(Experiment):
         self.gradient_step = gradient_step
         self.num_classes = num_classes
 
-        self.criterion = torch.nn.CrossEntropyLoss()
+        self.cross_entropy_loss = torch.nn.CrossEntropyLoss()
         self.optimizer = torch.optim.Adam(
             self.net.parameters(), lr=learning_rate, weight_decay=0.001
         )
@@ -73,140 +73,85 @@ class RecurrenceExperiment(Experiment):
     # TRAINING FUNCTIONS ######
     ################################
 
-    def train_model(self, model, train_loader, alpha, num_epochs=1):
+    def train_model(self, model, train_loader, alpha, gradient_step=5):
         """Train with minimal memory footprint."""
+        model.train()
 
-        for _ in range(num_epochs):  # Para cada epoca
-            total_loss, total_samples = (
-                0.0,
-                0,
-            )  # Inicializa a loss total e samples total
+        for _ in range(gradient_step): 
+            total_loss, total_samples = (0.0, 0)  
 
-            for (
-                data,
-                labels,
-            ) in train_loader:  # Para cada par de dados e labels no trainloader
+            for (data, labels) in train_loader:  
                 data, labels = (
                     data.float().to(self.device),
                     labels.long().to(self.device),
-                )  # Passa os dados e labels para a GPU
+                ) 
 
                 # Mixed precision forward
-                with autocast(
-                    enabled=True
-                ):  # Autocast seleciona de forma dinamica e automatica a precisao numerica
-                    outputs = model(
-                        data
-                    )  # Passa os dados pelo modelo e guarda as saidas geradas
-                    loss = self.criterion(
-                        outputs, labels
-                    )  # Utiliza entropia cruzada para calcular a loss
+                with autocast(enabled=True):  
+                    outputs = model(data)  
+                    loss = self.cross_entropy_loss(outputs, labels) 
 
-                total_loss += loss.item() * labels.size(
-                    0
-                )  # Total Loss é somado à loss atual * a quantidade de labels
-                total_samples += labels.size(
-                    0
-                )  # Samples total é somado à quantidade de labels
+                total_loss += loss.item() * labels.size(0)  
+                total_samples += labels.size(0)  
 
-                grads = torch.autograd.grad(
-                    loss, list(model.parameters()), create_graph=False
-                )  # Calcula o gradiente da loss em relação aos parametros do modelo
+                grads = torch.autograd.grad(loss, model.parameters(), create_graph=False)  
 
                 # Update parameters without tracking gradients
-                with torch.no_grad():  # Ignora os gradientes no bloco
-                    for param, grad_ in zip(
-                        model.parameters(), grads
-                    ):  # Para cada par parametro-gradiente
-                        if grad_ is not None:  # Se o gradiente é não nulo
-                            param -= (
-                                alpha * grad_
-                            )  # Subtrai-se do parametro o gradiente respectivo * uma constante alpha
+                with torch.no_grad(): 
+                    for param, grad_ in zip(model.parameters(), grads):
+                        if grad_ is not None:  
+                            param -= (alpha * grad_) 
 
                 # Clear tensors to avoid graph accumulation
-                del (
-                    grads,
-                    outputs,
-                    data,
-                    labels,
-                    loss,
-                )  # deleta variáveis para economizar espaço
-                torch.cuda.empty_cache()  # Esvazia a cache da GPU
+                del (grads, outputs, data, labels, loss)  
+                torch.cuda.empty_cache() 
 
-            torch.cuda.synchronize()  # forca a CPU a aguardar as operacoes CUDA ao fim da época
+            torch.cuda.synchronize()  
 
-        return total_loss / total_samples  # Retorna o valor de loss média
+        return total_loss / total_samples 
 
     def compute_query_loss(self, model, query_loader):
         """Compute gradients for query set with minimal GPU memory usage."""
-        model.eval()  # Altera o modo do modelo para avaliação
-        grads_sum = [
-            torch.zeros_like(p, device="cpu") for p in model.parameters()
-        ]  # Inicializa o vetor de somatorio de gradientes no formato do vetores de parametros
-        total_samples = 0  # Inicializa samples totais
+        #model.eval() # No Flower não existe esse passo. 
+        total_samples = 0  
+        loss_sum = 0.0
 
-        for data, labels in query_loader:  # Para cada par dado-label no quaryloader
+        for data, labels in query_loader:  
             data, labels = (
                 data.float().to(self.device),
                 labels.long().to(self.device),
-            )  # Carrega os dados e labels na GPU
-            batch_size = labels.size(0)  # Inicializa o tamanho do batch
-            total_samples += batch_size  # Soma o tamanho do batch ao total de samples
+            )
+            batch_size = labels.size(0)  
+            total_samples += batch_size  
 
             # Use mixed precision for memory efficiency
-            with torch.cuda.amp.autocast(
-                enabled=True
-            ):  # Aplica precisao numérica automática
-                outputs = model(data)  # Envia os dados para o modelo e salva a saída
-                loss = self.criterion(
-                    outputs, labels
-                )  # Calcula a perda com entropia cruzada
-
+            with torch.cuda.amp.autocast(enabled=True): 
+                outputs = model(data)  
+                loss = self.cross_entropy_loss(outputs, labels) 
+                loss_sum += loss * labels.size(0)
             # Compute per-batch grads, without graph
-            grads = torch.autograd.grad(
-                loss, list(model.parameters()), create_graph=False
-            )  # Computa os gradientes da loss em relação aos parametros do modelo
+            del (outputs, loss, data, labels)  
+        
+        loss_sum = loss_sum / total_samples
+        grads = torch.autograd.grad(loss_sum, model.parameters(), create_graph=False) 
 
-            # Accumulate grads safely on CPU
-            for i, g in enumerate(
-                grads
-            ):  # Para cada par índice-gradiente na lista de gradientes
-                if g is not None:  # Se o gradiente não é nulo
-                    grads_sum[i] += (
-                        g.detach().cpu() * batch_size
-                    )  # Soma na posição do índice em grads_sum o gradiente multiplicado pelo batch_size
+        for param in model.parameters():
+            if param.grad is not None:
+                param.grad.zero_()
 
-            del (
-                outputs,
-                loss,
-                grads,
-                data,
-                labels,
-            )  # Apaga variáveis para economizar memória
-            torch.cuda.empty_cache()  # Limpa cache da GPU
+        grads = [grad_.cpu().numpy() for grad_ in grads]
 
-        # Average grads across all samples
-        avg_grads = [
-            g / total_samples for g in grads_sum
-        ]  # Calcula o gradiente médio em cada posição da lista grads_sum
+        torch.cuda.empty_cache() 
+        torch.cuda.synchronize()  
 
-        # Convert to numpy for Flower
-        grads_np = [
-            g.numpy() for g in avg_grads
-        ]  # Converte os gradiente médios para numpy
-
-        del grads_sum, avg_grads  # Apaga variáveis para economizar memória
-        torch.cuda.empty_cache()  # Limpa cache da GPU
-        torch.cuda.synchronize()  # forca a CPU a aguardar as operacoes CUDA
-
-        return grads_np, len(query_loader.dataset)  # retorna os gradientes como numpy
+        return grads, len(query_loader.dataset) 
 
     def fit(
         self, parameters: NDArrays, config: Dict[str, Scalar]
     ) -> Tuple[NDArrays, int, Dict]:
 
-        torch.cuda.empty_cache()  # Limpa cache da GPU
-        torch.cuda.synchronize()  # Força CPU a aguardar operações CUDA
+        torch.cuda.empty_cache()  
+        torch.cuda.synchronize() 
 
         self.log(
             f"{self.cid} - FedMeta client training started",
@@ -217,38 +162,38 @@ class RecurrenceExperiment(Experiment):
         self.epoch_fl = config["server_round"]
 
         # === Load global model ===
-        self.set_parameters(parameters)  # Salva os parâmetros recebidos no modelo
+        self.set_parameters(parameters) 
 
         # === Clear any old adapted model ===
-        if hasattr(self, "adapted_model"):  # Se existir modelo adaptado
-            del self.adapted_model  # Apaga o modelo adaptado
-            torch.cuda.empty_cache()  # Limpa a cache da GPU
-            gc.collect()  # Força coleta de lixo
+        if hasattr(self, "adapted_model"): 
+            del self.adapted_model 
+            torch.cuda.empty_cache() 
+            gc.collect()  
 
         # === Reload dataloaders ===
         support_loader = self.trainloaders["sup"][self.cid]
         query_loader = self.trainloaders["qry"][self.cid]
 
         # === Create fresh model for adaptation ===
-        self.adapted_model = copy.deepcopy(self.net).to(
-            self.device
-        )  # Cria um modelo adaptado (uma cópia do modelo atual)
+        self.adapted_model = copy.deepcopy(self.net).to(self.device) 
 
+        # === Adapt model and calculate grads ===
         loss = self.train_model(
-            self.adapted_model, support_loader, self.learning_rate, self.num_epochs
-        )  # Treina o modelo adaptado com dados de treinamento
+            self.adapted_model, 
+            support_loader, 
+            self.learning_rate, 
+            self.gradient_step
+        ) 
 
-        grads, num_examples = self.compute_query_loss(
-            self.adapted_model, query_loader
-        )  # Calcula o gradiente do modelo adaptado com os dados de teste
+        grads, num_examples = self.compute_query_loss(self.adapted_model, query_loader) 
 
-        file_path = f"gradients_{self.cid}.npz"  # Cria um nome para o arquivo de gradientes
-        np.savez(file_path, *grads)  # Salva os gradientes desse cliente no arquivo
+        file_path = f"gradients_{self.cid}.npz" 
+        np.savez(file_path, *grads) 
 
-        # Free adapted model after training
-        del self.adapted_model, grads  # Deleta o modelo adaptado e os gradientes
-        torch.cuda.empty_cache()  # Limpa a cache da GPU
-        gc.collect()  # Força coleta de lixo
+        # === Clear memory ===
+        del self.adapted_model, grads 
+        torch.cuda.empty_cache() 
+        gc.collect()  
 
         self.log(
             f"{self.cid} - FedMeta client finished",
@@ -261,7 +206,7 @@ class RecurrenceExperiment(Experiment):
             self.get_parameters({}),
             num_examples,
             {"loss": loss, "grads_file": self.cid},
-        )  # Retorna os parâmetros originais do modelo, o tamanho total dos dados, a loss e o nome do arquivo de gradientes
+        )  
 
     ################################
     # TESTING FUNCTIONS ######
@@ -278,7 +223,7 @@ class RecurrenceExperiment(Experiment):
 
         # ---- Inner loop adaptation ----
         self.adapted_model = copy.deepcopy(self.net).to(self.device)
-        self.train_model(self.adapted_model, support_loader, alpha, 2)
+        self.train_model(self.adapted_model, support_loader, alpha, self.gradient_step)
 
         self.adapted_model.eval()
         total_loss = 0.0
@@ -290,7 +235,7 @@ class RecurrenceExperiment(Experiment):
                 y = y.long().to(self.device)
 
                 outputs = self.adapted_model(X)
-                total_loss += self.criterion(outputs, y).item()
+                total_loss += self.cross_entropy_loss(outputs, y).item()
                 _, predicted = torch.max(outputs.detach(), 1)
                 all_preds.extend(predicted.cpu().numpy())
                 all_labels.extend(y.cpu().numpy())
