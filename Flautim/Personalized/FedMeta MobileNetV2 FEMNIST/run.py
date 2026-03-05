@@ -13,7 +13,7 @@ from dataset import load_datasets
 
 DATASET = "FEMINIST"
 NUM_CHANNELS = 1
-BATCH_SIZE = 25
+BATCH_SIZE = 10
 NUM_ROUNDS = 2000
 NUM_EPOCHS = 1
 EMB_DIM = 64
@@ -39,11 +39,11 @@ def generate_server_fn(context, eval_fn=None):
 
         strategy = FedMeta(
             model=net,
-            lr_outer=1e-4,
+            lr_outer=0.0001,
             initial_parameters=params,
             evaluate_metrics_aggregation_fn=weighted_average,
-            fraction_fit=0.0001,
-            fraction_evaluate=0.0001,
+            fraction_fit=0.00001,
+            fraction_evaluate=0.00001,
             evaluate_fn=eval_fn,
             on_fit_config_fn=fit_config,
             on_evaluate_config_fn=fit_config,
@@ -106,7 +106,7 @@ if __name__ == "__main__":
         client_fn_callback = generate_client_fn(context, trainloaders, valloaders)
         server_fn_callback = generate_server_fn(context, eval_fn=None)
 
-        clients_resources = {"num_cpus": 1, "num_gpus": 0.15}
+        clients_resources = {"num_cpus": 4, "num_gpus": 0.25}
 
         fl.log("Starting Federated Experiment")
         # Run federated learning

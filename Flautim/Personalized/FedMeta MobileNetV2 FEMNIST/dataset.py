@@ -86,7 +86,7 @@ def load_datasets(
     """
     data_type = "femnist"
     sup_ratio = 0.2
-    batch_size = 32
+    batch_size = 10
 
     dataset = _partition_data(
         data_type=data_type, dir_path=path, support_ratio=sup_ratio

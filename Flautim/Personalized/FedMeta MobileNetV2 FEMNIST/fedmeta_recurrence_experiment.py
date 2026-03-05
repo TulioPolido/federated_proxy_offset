@@ -24,7 +24,7 @@ class RecurrenceExperiment(Experiment):
         trainloaders,
         valloaders,
         cid=0,
-        learning_rate=1e-3,
+        learning_rate=0.001,
         num_epochs=1,
         gradient_step=5,
         num_classes=7,
