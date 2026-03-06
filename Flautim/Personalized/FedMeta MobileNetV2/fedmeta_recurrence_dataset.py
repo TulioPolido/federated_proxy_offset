@@ -312,6 +312,21 @@ class RecurrenceDataset(Dataset):
             k = angle // 90
             img_tensor = torch.rot90(img_tensor, k=k, dims=(1, 2))
         return img_tensor
+    
+    # ==========================================================
+    # Dataset API
+    # ==========================================================
+    def __len__(self):
+        return len(self.labels)
+
+    def __getitem__(self, idx):
+        img = self.data[idx]
+        label = self.labels[idx]
+
+        if self.train_mode and self.use_rotation:
+            img = self._augment_image(img.clone())
+
+        return img, label
 
     # ==================================================
     # Dataloader
