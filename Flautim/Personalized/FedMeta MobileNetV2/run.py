@@ -17,6 +17,8 @@ BATCH_SIZE = 32
 NUM_ROUNDS = 100
 NUM_EPOCHS = 5
 EMB_DIM = 64
+BETA = 1e-4
+SUPPORT_RATIO = 0.3
 
 
 #########################
@@ -38,7 +40,7 @@ def generate_server_fn(context, eval_fn=None):
 
         strategy = FedMeta(
             model=net,
-            lr_outer=1e-4,
+            lr_outer=BETA,
             initial_parameters=params,
             evaluate_metrics_aggregation_fn=weighted_average,
             fraction_fit=0.4,
@@ -69,7 +71,7 @@ def generate_client_fn(context, files, test_file):
             test_file=test_file,
             augment_multiplier=2,
             use_rotation=True,
-            support_ratio=0.4,
+            support_ratio=SUPPORT_RATIO,
             num_workers=0,
         )
 
@@ -79,11 +81,8 @@ def generate_client_fn(context, files, test_file):
             context,
             client_name=cid,
             lr=LEARNING_RATE,
-            pre_train_lr=PRE_TRAIN_LEARNING_RATE,
             epochs=NUM_EPOCHS,
-            weight_decay=WEIGHT_DECAY,
-            lr_step=LEARNING_RATE_STEP,
-            lr_gamma=LEARNING_RATE_GAMMA,
+            weight_decay=WEIGHT_DECAY
         ).to_client()
 
     return create_client_fn
@@ -113,10 +112,9 @@ if __name__ == "__main__":
             NUM_CLASSES = 7
             WINDOW_SIZE = 1024
             STRIDE = 256
-            PRE_TRAIN_LEARNING_RATE = 1e-4
             LEARNING_RATE = 1e-5
-            LEARNING_RATE_STEP = 3
-            LEARNING_RATE_GAMMA = 0.5
+            # LEARNING_RATE_STEP = 3
+            # LEARNING_RATE_GAMMA = 0.5
             WEIGHT_DECAY = 6.7e-5
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]

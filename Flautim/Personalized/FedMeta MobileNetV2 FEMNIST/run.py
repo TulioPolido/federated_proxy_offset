@@ -47,6 +47,7 @@ def generate_server_fn(context, eval_fn=None):
             evaluate_fn=eval_fn,
             on_fit_config_fn=fit_config,
             on_evaluate_config_fn=fit_config,
+            use_ema=True
         )
 
         config = ServerConfig(num_rounds=NUM_ROUNDS)
