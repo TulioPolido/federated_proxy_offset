@@ -13,7 +13,7 @@ class RecurrenceDatasetLOSO(Dataset):
         train_file,
         test_file=None,
         use_rotation=False,
-        support_ratio=0.4,
+        support_ratio=0.2,
         stratified=True,
         seed=42,
         **kwargs,
@@ -96,12 +96,14 @@ class RecurrenceDatasetLOSO(Dataset):
                 label_idx = indices[labels_np == label]
                 rng.shuffle(label_idx)
 
+                split = max(1, int(len(label_idx) * self.support_ratio))
                 split = int(len(label_idx) * self.support_ratio)
 
                 support_indices.extend(label_idx[:split])
                 query_indices.extend(label_idx[split:])
         else:
             rng.shuffle(indices)
+            split = max(1, int(len(indices) * self.support_ratio))
             split = int(len(indices) * self.support_ratio)
 
             support_indices = indices[:split]
@@ -166,7 +168,7 @@ class RecurrenceDatasetLOSO(Dataset):
         query_loader = DataLoader(
             query_dataset,
             batch_size=self.batch_size,
-            shuffle=True,
+            shuffle=False,
             num_workers=self.num_workers,
         )
 

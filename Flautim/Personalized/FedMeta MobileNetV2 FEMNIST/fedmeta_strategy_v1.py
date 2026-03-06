@@ -49,13 +49,14 @@ class FedMeta(flwr.server.strategy.FedAvg):
     """Federated Meta-Learning Strategy (MAML-style)."""
 
 
-    def __init__(self, model, lr_inner=1e-4, lr_outer=1e-4, smoothing_weight=0.0, weight_decay=0.001, **kwargs):
+    def __init__(self, model, lr_inner=1e-4, lr_outer=1e-4, smoothing_weight=0.95, weight_decay=0.001, use_ema=False, **kwargs):
         super().__init__(**kwargs)  # forward other FedAvg args
         self.net = model
         self.beta = lr_outer
         self.alpha = lr_inner
         self.smoothing_weight = smoothing_weight
         self.weight_decay = weight_decay
+        self.use_ema = use_ema
         self.ema_loss = None
         self.ema_metrics = {}
 
@@ -145,19 +146,20 @@ class FedMeta(flwr.server.strategy.FedAvg):
             eval_metrics = [(res.num_examples, res.metrics) for _, res in results]
             metrics_aggregated = self.evaluate_metrics_aggregation_fn(eval_metrics)
             
-            for metric, value in metrics_aggregated.items():
-                if metric not in self.ema_metrics:
-                    self.ema_metrics[metric] = None
+            if self.use_ema:
+                for metric, value in metrics_aggregated.items():
+                    if metric not in self.ema_metrics:
+                        self.ema_metrics[metric] = None
 
-                value = float(value) * 100
+                    value = float(value) * 100
 
-                self.ema_metrics[metric] = self.update_ema(
-                    self.ema_metrics[metric],
-                    value,
-                    self.smoothing_weight,
-                )
+                    self.ema_metrics[metric] = self.update_ema(
+                        self.ema_metrics[metric],
+                        value,
+                        self.smoothing_weight,
+                    )
 
-                metrics_aggregated[metric] = round(self.ema_metrics[metric], 3)
+                    metrics_aggregated[metric] = round(self.ema_metrics[metric], 3)
 
         elif server_round == 1:  # Only log this warning once
             log(WARNING, "No evaluate_metrics_aggregation_fn provided")

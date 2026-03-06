@@ -81,10 +81,7 @@ class RecurrenceExperiment(Experiment):
             total_loss, total_samples = (0.0, 0)  
 
             for (data, labels) in train_loader:  
-                data, labels = (
-                    data.float().to(self.device),
-                    labels.long().to(self.device),
-                ) 
+                data, labels = (data.float().to(self.device), labels.long().to(self.device)) 
 
                 # Mixed precision forward
                 with autocast(enabled=True):  
@@ -117,10 +114,7 @@ class RecurrenceExperiment(Experiment):
         loss_sum = 0.0
 
         for data, labels in query_loader:  
-            data, labels = (
-                data.float().to(self.device),
-                labels.long().to(self.device),
-            )
+            data, labels = (data.float().to(self.device), labels.long().to(self.device))
             batch_size = labels.size(0)  
             total_samples += batch_size  
 
@@ -129,7 +123,7 @@ class RecurrenceExperiment(Experiment):
                 outputs = model(data)  
                 loss = self.cross_entropy_loss(outputs, labels) 
                 loss_sum += loss * labels.size(0)
-            # Compute per-batch grads, without graph
+
             del (outputs, loss, data, labels)  
         
         loss_sum = loss_sum / total_samples
