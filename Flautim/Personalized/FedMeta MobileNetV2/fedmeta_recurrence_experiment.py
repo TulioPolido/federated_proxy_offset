@@ -30,10 +30,11 @@ class RecurrenceExperiment(Experiment):
         lr_step=3,
         lr_gamma=0.5,
         num_classes=7,
+        label_smoothing=0.1,
         **kwargs,
     ):
         super(RecurrenceExperiment, self).__init__(model, dataset, context, **kwargs)
-        self.criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
+        self.criterion = torch.nn.CrossEntropyLoss(label_smoothing=label_smoothing)
         self.optimizer = torch.optim.Adam(
             self.model.parameters(), lr=lr, weight_decay=weight_decay
         )

@@ -1,6 +1,6 @@
 from collections import OrderedDict
-from logging import ERROR, INFO
-from typing import List, Optional, Tuple, Union
+from logging import ERROR, INFO, WARNING
+from typing import List, Optional, Tuple, Union, Dict
 
 import flwr
 import numpy as np
@@ -48,11 +48,16 @@ def fedmeta_update_maml(
 class FedMeta(flwr.server.strategy.FedAvg):
     """Federated Meta-Learning Strategy (MAML-style)."""
 
-    def __init__(self, model, lr_inner=1e-4, lr_outer=1e-4, **kwargs):
+
+    def __init__(self, model, lr_inner=1e-4, lr_outer=1e-4, smoothing_weight=0.0, weight_decay=0.001, **kwargs):
         super().__init__(**kwargs)  # forward other FedAvg args
         self.net = model
         self.beta = lr_outer
         self.alpha = lr_inner
+        self.smoothing_weight = smoothing_weight
+        self.weight_decay = weight_decay
+        self.ema_loss = None
+        self.ema_metrics = {}
 
     def aggregate_fit(self, server_round, results, failures):
         for failure in failures:
@@ -98,7 +103,7 @@ class FedMeta(flwr.server.strategy.FedAvg):
             beta=self.beta,
             weights_results=weights_results[0][0],
             gradients_aggregated=gradients_aggregated,
-            weight_decay=1e-4,
+            weight_decay=self.weight_decay,
         )
         parameters_aggregated = ndarrays_to_parameters(weights_prime)
 
@@ -113,12 +118,10 @@ class FedMeta(flwr.server.strategy.FedAvg):
     def aggregate_evaluate(
         self,
         server_round: int,
-        results: list[tuple[ClientProxy, EvaluateRes]],
-        failures: list[Union[tuple[ClientProxy, EvaluateRes], BaseException]],
-    ) -> tuple[Optional[float], dict[str, Scalar]]:
+        results: List[Tuple[ClientProxy, EvaluateRes]],
+        failures: List[Union[Tuple[ClientProxy, EvaluateRes], BaseException]],
+    ) -> Tuple[Optional[float], Dict[str, Scalar]]:
         """Aggregate evaluation losses using weighted average."""
-        for failure in failures:
-            log(ERROR, f"Evaluate Failure: {failure}")
         if not results:
             return None, {}
         # Do not aggregate if there are failures and failures are not accepted
@@ -133,10 +136,57 @@ class FedMeta(flwr.server.strategy.FedAvg):
             ]
         )
 
+        self.ema_loss = self.update_ema(self.ema_loss, loss_aggregated, self.smoothing_weight)
+        loss_aggregated = self.ema_loss
+
         # Aggregate custom metrics if aggregation fn was provided
         metrics_aggregated = {}
         if self.evaluate_metrics_aggregation_fn:
             eval_metrics = [(res.num_examples, res.metrics) for _, res in results]
             metrics_aggregated = self.evaluate_metrics_aggregation_fn(eval_metrics)
+            
+            for metric, value in metrics_aggregated.items():
+                if metric not in self.ema_metrics:
+                    self.ema_metrics[metric] = None
+
+                value = float(value) * 100
+
+                self.ema_metrics[metric] = self.update_ema(
+                    self.ema_metrics[metric],
+                    value,
+                    self.smoothing_weight,
+                )
+
+                metrics_aggregated[metric] = round(self.ema_metrics[metric], 3)
+
+        elif server_round == 1:  # Only log this warning once
+            log(WARNING, "No evaluate_metrics_aggregation_fn provided")
 
         return loss_aggregated, metrics_aggregated
+    
+
+    def update_ema(self,
+        prev_ema: Optional[float],
+        current_value: float,
+        smoothing_weight: float,
+    ) -> float:
+        """We use EMA to visually enhance the learning trend for each round.
+
+        Parameters
+        ----------
+        prev_ema : float
+            The list of metrics to aggregate.
+        current_value : float
+            The list of metrics to aggregate.
+        smoothing_weight : float
+            The list of metrics to aggregate.
+
+
+        Returns
+        -------
+        EMA_Loss or EMA_ACC
+            The weighted average metric.
+        """
+        if prev_ema is None:
+            return current_value
+        return (1 - smoothing_weight) * current_value + smoothing_weight * prev_ema

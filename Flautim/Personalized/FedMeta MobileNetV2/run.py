@@ -4,7 +4,7 @@ import flautim as fl
 import flwr
 import RecurrenceModel
 import torch
-from fedmeta_recurrence_dataset import RecurrenceDataset
+from fedmeta_recurrence_dataset import RecurrenceDatasetLOSO
 from fedmeta_recurrence_experiment import RecurrenceExperiment
 from fedmeta_strategy_v1 import FedMeta
 from flautim.pytorch.common import run_federated, weighted_average
@@ -64,12 +64,12 @@ def generate_client_fn(context, files, test_file):
             context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=cid
         )
 
-        dataset = RecurrenceDataset(
+        dataset = RecurrenceDatasetLOSO(
             train_file=file,
             test_file=test_file,
             augment_multiplier=2,
             use_rotation=True,
-            support_ratio=0.4,
+            support_ratio=0.3,
             num_workers=0,
         )
 
