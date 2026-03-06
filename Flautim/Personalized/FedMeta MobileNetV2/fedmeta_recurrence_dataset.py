@@ -13,7 +13,7 @@ class RecurrenceDatasetLOSO(Dataset):
         train_file,
         test_file=None,
         use_rotation=False,
-        support_ratio=0.2,
+        support_ratio=0.3,
         stratified=True,
         seed=42,
         **kwargs,
@@ -76,10 +76,6 @@ class RecurrenceDatasetLOSO(Dataset):
 
         self.val_qry_x = val_x[val_qry_idx]
         self.val_qry_y = val_y[val_qry_idx]
-
-        # Default dataset content (used by __getitem__)
-        self.data = self.train_sup_x
-        self.labels = self.train_sup_y
 
     # ==========================================================
     # Support / Query split
@@ -173,13 +169,14 @@ class RecurrenceDatasetLOSO(Dataset):
         )
 
         return [support_loader, query_loader]
+    
 
 class RecurrenceDataset(Dataset):
     def __init__(
         self,
         dataset_file,
         train_ratio=0.8,
-        support_ratio=0.4,
+        support_ratio=0.3,
         stratified=True,
         seed=42,
         use_rotation=False,
