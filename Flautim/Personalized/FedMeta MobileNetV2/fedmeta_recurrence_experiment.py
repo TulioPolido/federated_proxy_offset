@@ -121,7 +121,7 @@ class RecurrenceExperiment(Experiment):
             del (outputs, loss, data, labels)  
 
         loss_sum = loss_sum / total_samples
-        grads = torch.autograd.grad(loss, model.parameters(), create_graph=False)
+        grads = torch.autograd.grad(loss_sum, model.parameters(), create_graph=False)
 
         for param in model.parameters():
             if param.grad is not None:

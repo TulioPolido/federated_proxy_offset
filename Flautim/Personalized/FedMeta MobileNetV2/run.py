@@ -66,6 +66,15 @@ def generate_client_fn(context, files, test_file):
             context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=cid
         )
 
+        # dataset = RecurrenceDatasetLOSO(
+        #     train_file=file,
+        #     test_file=test_file,
+        #     augment_multiplier=2,
+        #     use_rotation=True,
+        #     support_ratio=SUPPORT_RATIO,
+        #     num_workers=0,
+        # )
+
         dataset = RecurrenceDataset(
             dataset_file=file,
             augment_multiplier=2,
