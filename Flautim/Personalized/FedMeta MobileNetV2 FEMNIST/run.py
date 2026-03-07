@@ -1,7 +1,11 @@
 import random
 
 import flautim as fl
-import FemnistNetwork
+MODEL = "MOBILENETV2"
+if MODEL == "FEMNIST":
+    import FemnistNetwork
+elif MODEL == "MOBILENETV2":
+    import fedmeta_mobilenet_model
 from fedmeta_recurrence_experiment import RecurrenceExperiment
 from fedmeta_recurrence_dataset import RecurrenceDataset
 from fedmeta_strategy_v1 import FedMeta
@@ -11,12 +15,13 @@ from flwr.server import ServerAppComponents, ServerConfig
 
 from dataset import load_datasets
 
-DATASET = "FEMINIST"
+DATASET = "FEMNIST"
 NUM_CHANNELS = 1
 BATCH_SIZE = 10
 NUM_ROUNDS = 2000
 NUM_EPOCHS = 1
 EMB_DIM = 64
+USE_EMA = False
 
 
 #########################
@@ -31,9 +36,15 @@ def fit_config(server_round):
 def generate_server_fn(context, eval_fn=None):
     def create_server_fn(context_flwr):
 
-        net = FemnistNetwork.FemnistNetwork(
-            context, suffix=0
-        )
+
+        if MODEL == "FEMNIST":
+            net = FemnistNetwork.FemnistNetwork(
+                context, suffix=0
+            )
+        elif MODEL == "MOBILENETV2":
+            net = fedmeta_mobilenet_model.MobileNetV2WithoutBatchNorm(
+                context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=0
+            )
         params = ndarrays_to_parameters(net.get_parameters())
         
 
@@ -47,7 +58,7 @@ def generate_server_fn(context, eval_fn=None):
             evaluate_fn=eval_fn,
             on_fit_config_fn=fit_config,
             on_evaluate_config_fn=fit_config,
-            use_ema=True,
+            use_ema=USE_EMA,
             smoothing_weight=0.95
         )
 
@@ -62,9 +73,14 @@ def generate_client_fn(context, trainloaders, valloaders):
 
         cid = int(context_flwr.node_config["partition-id"])
 
-        model = FemnistNetwork.FemnistNetwork(
-            context, suffix=cid
-        )
+        if MODEL == "FEMNIST":
+            model = FemnistNetwork.FemnistNetwork(
+                context, suffix=cid
+            )
+        elif MODEL == "MOBILENETV2":
+            model = fedmeta_mobilenet_model.MobileNetV2WithoutBatchNorm(
+                context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=cid
+            )
 
         dataset = RecurrenceDataset(
             num_workers=0
@@ -98,7 +114,7 @@ if __name__ == "__main__":
         random.seed(seed)
         fl.log(f"Using random seed: {seed}")
 
-        if DATASET == "FEMINIST":
+        if DATASET == "FEMNIST":
             NUM_CLASSES = 62
 
             # partition dataset and get dataloaders

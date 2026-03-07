@@ -23,7 +23,7 @@ def fit_config(server_round):
 def generate_server_fn(context, eval_fn):
     def create_server_fn(context_flwr):
         try:
-            net = RecurrenceModel.RecurrenceModel(
+            net = RecurrenceModel.MobileNetV2WithoutBatchNorm(
                 context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=0
             )
             params = ndarrays_to_parameters(net.get_parameters())
@@ -52,7 +52,7 @@ def generate_client_fn(context, files, test_file):
             cid = int(context_flwr.node_config["partition-id"])
             file = files[cid]
 
-            model = RecurrenceModel.RecurrenceModel(
+            model = RecurrenceModel.MobileNetV2WithoutBatchNorm(
                 context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=cid
             )
 
