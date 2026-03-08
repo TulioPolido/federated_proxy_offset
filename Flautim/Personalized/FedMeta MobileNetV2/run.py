@@ -1,11 +1,10 @@
 import random
 
 import flautim as fl
-import flwr
-import RecurrenceModel
 import torch
 from fedmeta_recurrence_dataset import RecurrenceDatasetLOSO, RecurrenceDataset
 from fedmeta_recurrence_experiment import RecurrenceExperiment
+import fedmeta_mobilenet_model
 from fedmeta_strategy_v1 import FedMeta
 from flautim.pytorch.common import run_federated, weighted_average
 from flwr.common import ndarrays_to_parameters
@@ -15,10 +14,14 @@ DATASET = "PAMAP"
 NUM_CHANNELS = 6
 BATCH_SIZE = 16
 NUM_ROUNDS = 100
-NUM_EPOCHS = 5
+NUM_EPOCHS = 1
+GRADIENT_STEP = 5
 EMB_DIM = 64
 BETA = 1e-4
 SUPPORT_RATIO = 0.3
+SMOOTHING_WEIGHT = 0.95
+USE_EMA = False
+USE_LOSO = True
 
 
 #########################
@@ -33,7 +36,7 @@ def fit_config(server_round):
 def generate_server_fn(context, eval_fn=None):
     def create_server_fn(context_flwr):
 
-        net = RecurrenceModel.RecurrenceModel(
+        net = fedmeta_mobilenet_model.MobileNetV2WithoutBatchNorm(
             context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=0
         )
         params = ndarrays_to_parameters(net.get_parameters())
@@ -43,11 +46,13 @@ def generate_server_fn(context, eval_fn=None):
             lr_outer=BETA,
             initial_parameters=params,
             evaluate_metrics_aggregation_fn=weighted_average,
-            fraction_fit=0.4,
-            fraction_evaluate=1.0,
+            fraction_fit=FRACTION_FIT,
+            fraction_evaluate=FRACTION_EVALUATE,
             evaluate_fn=eval_fn,
             on_fit_config_fn=fit_config,
             on_evaluate_config_fn=fit_config,
+            use_ema=USE_EMA,
+            smoothing_weight=SMOOTHING_WEIGHT
         )
 
         config = ServerConfig(num_rounds=NUM_ROUNDS)
@@ -62,35 +67,38 @@ def generate_client_fn(context, files, test_file):
         cid = int(context_flwr.node_config["partition-id"])
         file = files[cid]
 
-        model = RecurrenceModel.RecurrenceModel(
+        model = fedmeta_mobilenet_model.MobileNetV2WithoutBatchNorm(
             context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=cid
         )
 
-        # dataset = RecurrenceDatasetLOSO(
-        #     train_file=file,
-        #     test_file=test_file,
-        #     augment_multiplier=2,
-        #     use_rotation=True,
-        #     support_ratio=SUPPORT_RATIO,
-        #     num_workers=0,
-        # )
-
-        dataset = RecurrenceDataset(
-            dataset_file=file,
-            augment_multiplier=2,
-            use_rotation=True,
-            support_ratio=SUPPORT_RATIO,
-            num_workers=0,
-        )
+        if USE_LOSO:
+            dataset = RecurrenceDatasetLOSO(
+                train_file=file,
+                test_file=test_file,
+                augment_multiplier=2,
+                use_rotation=True,
+                support_ratio=SUPPORT_RATIO,
+                num_workers=0,
+            )
+        else:
+            dataset = RecurrenceDataset(
+                dataset_file=file,
+                augment_multiplier=2,
+                use_rotation=True,
+                support_ratio=SUPPORT_RATIO,
+                num_workers=0,
+            )
 
         return RecurrenceExperiment(
+            context,
             model,
             dataset,
-            context,
-            client_name=cid,
+            cid=cid,
             lr=LEARNING_RATE,
             epochs=NUM_EPOCHS,
-            weight_decay=WEIGHT_DECAY
+            weight_decay=WEIGHT_DECAY,
+            gradient_step=GRADIENT_STEP,
+            num_classes=NUM_CLASSES,
         ).to_client()
 
     return create_client_fn
@@ -121,9 +129,9 @@ if __name__ == "__main__":
             WINDOW_SIZE = 1024
             STRIDE = 256
             LEARNING_RATE = 1e-5
-            # LEARNING_RATE_STEP = 3
-            # LEARNING_RATE_GAMMA = 0.5
             WEIGHT_DECAY = 6.7e-5
+            FRACTION_FIT = 0.4
+            FRACTION_EVALUATE = 1.0
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
@@ -136,7 +144,7 @@ if __name__ == "__main__":
             fl.log(f"Test users: {test_files}")
 
             # Load training client files
-            files = [
+            train_files = [
                 torch.load(
                     f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
                 )
@@ -153,8 +161,8 @@ if __name__ == "__main__":
 
         elif DATASET == "WISDM":
             # Number of training clients
-            TOTAL_USERS = 10  # 51
-            NUM_CLIENTS = 8  # 41
+            TOTAL_USERS = 51
+            NUM_CLIENTS = 41
             TEST_USERS = TOTAL_USERS - NUM_CLIENTS
             NUM_CLASSES = 5
             WINDOW_SIZE = 256
@@ -164,8 +172,10 @@ if __name__ == "__main__":
             LEARNING_RATE_STEP = 3
             LEARNING_RATE_GAMMA = 0.5
             WEIGHT_DECAY = 1.1e-5
+            FRACTION_FIT = 0.1
+            FRACTION_EVALUATE = 0.2
 
-            all_files = [i for i in range(1, TOTAL_USERS + 1) if i not in [38, 41, 44]]
+            all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
             # Shuffle and split
             test_files = random.sample(all_files, TEST_USERS)
@@ -174,7 +184,7 @@ if __name__ == "__main__":
             fl.log(f"Test users: {test_files}")
 
             # Load training client files
-            files = [
+            train_files = [
                 torch.load(
                     f"./data/WISDM_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
                 )
@@ -194,7 +204,7 @@ if __name__ == "__main__":
             "labels": torch.cat([f["labels"] for f in test_files], dim=0),
         }
 
-        client_fn_callback = generate_client_fn(context, files, combined_test_data)
+        client_fn_callback = generate_client_fn(context, train_files, combined_test_data)
         evaluate_fn_callback = evaluate_fn(context, combined_test_data)
         server_fn_callback = generate_server_fn(context, eval_fn=None)
 
