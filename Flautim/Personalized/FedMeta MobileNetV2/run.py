@@ -9,7 +9,7 @@ from flautim.pytorch.common import run_federated, weighted_average
 from flwr.common import ndarrays_to_parameters
 from flwr.server import ServerAppComponents, ServerConfig
 
-MODEL = "MobileNetV2"
+MODEL = "MobileNetV2WithoutBatchNorm"
 if MODEL == "MobileNetV2WithoutBatchNorm":
     from fedmeta_mobilenet_model import MobileNetV2WithoutBatchNorm as Model
 elif MODEL == "MobileNetV2":
@@ -20,9 +20,9 @@ NUM_CHANNELS = 6
 BATCH_SIZE = 16
 NUM_ROUNDS = 500
 NUM_EPOCHS = 1
-GRADIENT_STEP = 5
+GRADIENT_STEP = 2
 EMB_DIM = 64
-BETA = 1e-4
+BETA = 5e-5
 SUPPORT_RATIO = 0.3
 SMOOTHING_WEIGHT = 0.95
 USE_EMA = False
@@ -133,7 +133,7 @@ if __name__ == "__main__":
             NUM_CLASSES = 7
             WINDOW_SIZE = 1024
             STRIDE = 256
-            LEARNING_RATE = 1e-5
+            LEARNING_RATE = 5e-3
             WEIGHT_DECAY = 6.7e-5
             FRACTION_FIT = 0.4
             FRACTION_EVALUATE = 1.0
@@ -173,7 +173,7 @@ if __name__ == "__main__":
             WINDOW_SIZE = 256
             STRIDE = 64
             PRE_TRAIN_LEARNING_RATE = 5e-5
-            LEARNING_RATE = 1e-5
+            LEARNING_RATE = 5e-3
             LEARNING_RATE_STEP = 3
             LEARNING_RATE_GAMMA = 0.5
             WEIGHT_DECAY = 1.1e-5
