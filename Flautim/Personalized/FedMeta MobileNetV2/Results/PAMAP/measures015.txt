@@ -1,0 +1,49 @@
+=== Experiment Parameters ===
+measures 015
+
+=== Best Epoch Results per Experiment (averaged across users) ===
+
+Experiment A - User 0:
+Balanced Accuracy: 0.6103667747292153
+Precision: 0.6837347299147635
+F1 Score: 0.6736630742840286
+
+Experiment A - User 1:
+Balanced Accuracy: 0.6103667747292153
+Precision: 0.6794314684048525
+F1 Score: 0.6722344582916578
+
+Experiment A - User 2:
+Balanced Accuracy: 0.5507922975953666
+Precision: 0.586046858695254
+F1 Score: 0.6277301945135291
+
+Experiment A - User 3:
+Balanced Accuracy: 0.5766248528396867
+Precision: 0.6019063759658978
+F1 Score: 0.6499233863071011
+
+Experiment A - User 4:
+Balanced Accuracy: 0.5583546655377127
+Precision: 0.6148528356940904
+F1 Score: 0.6313702813319626
+
+Experiment A - User 5:
+Balanced Accuracy: 0.6046969512442658
+Precision: 0.628243737653088
+F1 Score: 0.6618766979601541
+
+Experiment A - User 6:
+Balanced Accuracy: 0.6087468030690537
+Precision: 0.6469429664595476
+F1 Score: 0.6662028427439245
+
+Experiment A (Averaged across users):
+Balanced Accuracy: 0.5886
+Precision: 0.6345
+F1 Score: 0.6547
+
+=== Average Across Experiments (user-averaged) ===
+Average Balanced Accuracy: 0.5886
+Average Precision: 0.6345
+Average F1 Score: 0.6547

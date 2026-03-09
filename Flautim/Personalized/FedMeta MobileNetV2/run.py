@@ -4,16 +4,21 @@ import flautim as fl
 import torch
 from fedmeta_recurrence_dataset import RecurrenceDatasetLOSO, RecurrenceDataset
 from fedmeta_recurrence_experiment import RecurrenceExperiment
-import fedmeta_mobilenet_model
 from fedmeta_strategy_v1 import FedMeta
 from flautim.pytorch.common import run_federated, weighted_average
 from flwr.common import ndarrays_to_parameters
 from flwr.server import ServerAppComponents, ServerConfig
 
+MODEL = "MobileNetV2"
+if MODEL == "MobileNetV2WithoutBatchNorm":
+    from fedmeta_mobilenet_model import MobileNetV2WithoutBatchNorm as Model
+elif MODEL == "MobileNetV2":
+    from RecurrenceModel import RecurrenceModel as Model
+
 DATASET = "PAMAP"
 NUM_CHANNELS = 6
 BATCH_SIZE = 16
-NUM_ROUNDS = 100
+NUM_ROUNDS = 500
 NUM_EPOCHS = 1
 GRADIENT_STEP = 5
 EMB_DIM = 64
@@ -36,7 +41,7 @@ def fit_config(server_round):
 def generate_server_fn(context, eval_fn=None):
     def create_server_fn(context_flwr):
 
-        net = fedmeta_mobilenet_model.MobileNetV2WithoutBatchNorm(
+        net = Model(
             context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=0
         )
         params = ndarrays_to_parameters(net.get_parameters())
@@ -67,7 +72,7 @@ def generate_client_fn(context, files, test_file):
         cid = int(context_flwr.node_config["partition-id"])
         file = files[cid]
 
-        model = fedmeta_mobilenet_model.MobileNetV2WithoutBatchNorm(
+        model = Model(
             context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=cid
         )
 
