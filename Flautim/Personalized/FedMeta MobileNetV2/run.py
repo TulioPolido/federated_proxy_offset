@@ -15,7 +15,7 @@ if MODEL == "MobileNetV2WithoutBatchNorm":
 elif MODEL == "MobileNetV2":
     from RecurrenceModel import RecurrenceModel as Model
 
-DATASET = "PAMAP"
+DATASET = "WISDM"
 NUM_CHANNELS = 6
 BATCH_SIZE = 16
 NUM_ROUNDS = 500
@@ -135,7 +135,7 @@ if __name__ == "__main__":
             STRIDE = 256
             LEARNING_RATE = 5e-3
             WEIGHT_DECAY = 6.7e-5
-            FRACTION_FIT = 0.4
+            FRACTION_FIT = 0.8
             FRACTION_EVALUATE = 1.0
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
@@ -172,10 +172,7 @@ if __name__ == "__main__":
             NUM_CLASSES = 5
             WINDOW_SIZE = 256
             STRIDE = 64
-            PRE_TRAIN_LEARNING_RATE = 5e-5
             LEARNING_RATE = 5e-3
-            LEARNING_RATE_STEP = 3
-            LEARNING_RATE_GAMMA = 0.5
             WEIGHT_DECAY = 1.1e-5
             FRACTION_FIT = 0.1
             FRACTION_EVALUATE = 0.2
