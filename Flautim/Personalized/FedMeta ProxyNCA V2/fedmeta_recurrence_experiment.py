@@ -121,52 +121,48 @@ class RecurrenceExperiment(Experiment):
         return total_loss / max(1, total_samples) 
 
     def compute_query_loss(self, model, adapted_backbone, query_loader, deltaP):
-        """Compute gradients for query set with minimal GPU memory usage."""
-        #model.eval() # No Flower não existe esse passo. 
+
         model.proxies.requires_grad_(True)
-        total_samples = 0  
+
+        total_samples = 0
         loss_sum = 0.0
 
-        # Em vez de params = list(adapted_backbone.parameters()) + [model.proxies]
-        # vamos pegar NOMES compatíveis com o modelo global:
         named_backbone = list(adapted_backbone.named_parameters())
         names = [f"backbone.{n}" for n, _ in named_backbone] + ["proxies"]
         params = [p for _, p in named_backbone] + [model.proxies]
-        grads_sum = {
-            name: torch.zeros_like(param, device="cpu")
-            for name, param in zip(names, params)
-        }
 
-        proxies_eff = model.proxies + deltaP.detach()  # IMPORTANT: no grad into ΔP
+        proxies_eff = model.proxies + deltaP.detach()  # no grad through ΔP
 
-        for data, labels in query_loader:  
-            data, labels = (data.float().to(self.device), labels.long().to(self.device))
-            batch_size = labels.size(0)  
-            total_samples += batch_size  
+        for data, labels in query_loader:
+            data = data.float().to(self.device)
+            labels = labels.long().to(self.device)
 
-            # Use mixed precision for memory efficiency
-            with torch.cuda.amp.autocast(enabled=True): 
+            batch_size = labels.size(0)
+            total_samples += batch_size
+
+            with torch.cuda.amp.autocast(enabled=True):
                 emb = extract_embeddings(adapted_backbone, data)
                 loss = self.loss_fn(emb, proxies_eff, labels)
-            
-            loss_sum += float(loss.detach().cpu()) * batch_size
-            grads = torch.autograd.grad(loss_sum, params, create_graph=False) 
 
-            for name, g in zip(names, grads):
-                    if g is None:
-                        continue
-                    grads_sum[name].add_(g.detach().cpu() * batch_size)
-            
-            del (data, labels, batch_size, emb, loss, grads)  
+            # IMPORTANT: keep tensor, not .item()
+            loss_sum += loss * batch_size
+
+            del data, labels, emb, loss
+
+        loss_sum = loss_sum / total_samples
+
+        grads = torch.autograd.grad(loss_sum, params, create_graph=False)
 
         avg_grads = {
-            k: (v / max(1, total_samples)).numpy() for k, v in grads_sum.items()
+            name: g.detach().cpu().numpy()
+            for name, g in zip(names, grads)
+            if g is not None
         }
 
-        torch.cuda.empty_cache() 
-        torch.cuda.synchronize()  
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
 
-        return avg_grads, total_samples, loss_sum/max(1, total_samples)
+        return avg_grads, total_samples, loss_sum.item()
 
     def fit(
         self, parameters: NDArrays, config: Dict[str, Scalar]
