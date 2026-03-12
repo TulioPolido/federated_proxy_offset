@@ -10,23 +10,24 @@ from flwr.common import ndarrays_to_parameters
 from flautim.pytorch.common import run_federated, weighted_average
 
 import RecurrenceModel
-from fedmeta_recurrence_dataset import RecurrenceDataset
-
+from fedmeta_recurrence_dataset import RecurrenceDatasetLOSO
+from fedmeta_recurrence_experiment import RecurrenceExperiment, HFMetaMetricConfig
 from meta_metric_model import MetaMetricModel
-from hf_meta_metric_experiment_recurrence import (
-    HFMetaMetricRecurrenceExperiment,
-    HFMetaMetricConfig,
-)
-from hf_meta_metric_strategy import HFMetaMetricStrategy
+from fedmeta_strategy_v1 import FedMeta
 
 
 DATASET = "PAMAP"
 NUM_CHANNELS = 6
-BATCH_SIZE = 32
-NUM_ROUNDS = 100
-INNER_EPOCHS = 2
-ALPHA = 5e-4
-BETA = 1e-4
+BATCH_SIZE = 16
+NUM_ROUNDS = 500
+NUM_EPOCHS = 1
+GRADIENT_STEP = 2
+EMB_DIM = 64
+BETA = 5e-5
+SUPPORT_RATIO = 0.3
+SMOOTHING_WEIGHT = 0.95
+USE_EMA = False
+USE_LOSO = True
 
 
 def fit_config(server_round: int):
@@ -41,6 +42,7 @@ def generate_server_fn(context, eval_fn=None):
             num_classes=NUM_CLASSES,  # usado só para classifier (não é o embedding)
             num_channels=NUM_CHANNELS,
             suffix=0,
+            batch_norm=False,
         )
 
         # Emb dim = 1280 no MobileNetV2
@@ -55,16 +57,18 @@ def generate_server_fn(context, eval_fn=None):
         )
         params = ndarrays_to_parameters(net.get_parameters())
 
-        strategy = HFMetaMetricStrategy(
+        strategy = FedMeta(
             model=net,
             lr_outer=BETA,
             initial_parameters=params,
             evaluate_metrics_aggregation_fn=weighted_average,
-            fraction_fit=0.4,
-            fraction_evaluate=1.0,
+            fraction_fit=FRACTION_FIT,
+            fraction_evaluate=FRACTION_EVALUATE,
             evaluate_fn=eval_fn,
             on_fit_config_fn=fit_config,
             on_evaluate_config_fn=fit_config,
+            use_ema=USE_EMA,
+            smoothing_weight=SMOOTHING_WEIGHT
         )
 
         config = ServerConfig(num_rounds=NUM_ROUNDS)
@@ -94,19 +98,19 @@ def generate_client_fn(context, files, test_file):
             suffix=cid,
         )
 
-        dataset = RecurrenceDataset(
+        dataset = RecurrenceDatasetLOSO(
             train_file=train_file,
             test_file=test_file,
             augment_multiplier=2,
             use_rotation=True,
-            support_ratio=0.5,
+            support_ratio=SUPPORT_RATIO,
             num_workers=0,
             batch_size=BATCH_SIZE,
         )
 
         cfg = HFMetaMetricConfig(
             alpha=ALPHA,
-            inner_epochs=INNER_EPOCHS,
+            inner_epochs=GRADIENT_STEP,
             lambda_offset=1e-3,
             temperature=0.1,
             normalize_embeddings=True,
@@ -114,12 +118,12 @@ def generate_client_fn(context, files, test_file):
             use_amp=True,
         )
 
-        return HFMetaMetricRecurrenceExperiment(
-            model=model,
-            dataset=dataset,
+        return RecurrenceExperiment(
             context=context,
+            net=model,
+            dataset=dataset,
             client_name=cid,
-            cfg=cfg,
+            cfg=cfg
         ).to_client()
 
     return create_client_fn
@@ -138,6 +142,10 @@ if __name__ == "__main__":
         NUM_CLASSES = 5
         WINDOW_SIZE = 256
         STRIDE = 64
+        ALPHA = 5e-3
+        WEIGHT_DECAY = 1.1e-5
+        FRACTION_FIT = 0.1
+        FRACTION_EVALUATE = 0.2
 
         all_files = [i for i in range(1, TOTAL_USERS + 1) if i not in [38, 41, 44]]
         test_users = random.sample(all_files, TEST_USERS)
@@ -166,6 +174,10 @@ if __name__ == "__main__":
         NUM_CLASSES = 7
         WINDOW_SIZE = 1024
         STRIDE = 256
+        ALPHA = 5e-3
+        WEIGHT_DECAY = 6.7e-5
+        FRACTION_FIT = 0.8
+        FRACTION_EVALUATE = 1.0
 
         all_files = [i for i in range(1, TOTAL_USERS + 1)]
         test_users = [7]
