@@ -2,6 +2,7 @@ import copy
 import gc
 from collections import OrderedDict
 from typing import Dict, Tuple
+from dataclasses import dataclass
 
 import numpy as np
 import torch
@@ -84,7 +85,7 @@ class RecurrenceExperiment(Experiment):
                 # Mixed precision forward
                 with autocast(enabled=True):  
                     emb = extract_embeddings(adapted_backbone, data)
-                    loss_proxy = self.loss_fn(emb, proxies_eff, y)
+                    loss_proxy = self.loss_fn(emb, proxies_eff, labels)
                     loss_reg = self.cfg.lambda_offset * deltaP.pow(2).sum()
                     loss = loss_proxy + loss_reg
 
@@ -95,17 +96,25 @@ class RecurrenceExperiment(Experiment):
                 grads = torch.autograd.grad(
                     loss, 
                     params + [deltaP], 
-                    create_graph=False
+                    create_graph=False,
+                    allow_unused=True
                 ) 
 
                 grads_backbone = grads[:-1]
                 grads_delta = grads[-1]
 
+
                 # Update parameters without tracking gradients
                 with torch.no_grad(): 
                     for param, grad_ in zip(model.parameters(), grads_backbone):
                         if grad_ is not None:  
-                            param.add_(grad_, alpha=-float(alpha))
+                            try:
+                                param.add_(grad_, alpha=-float(alpha))
+                            except Exception as e:
+                                self.log(f"param shape: {param.shape}")
+                                self.log(f"grad_ shape: {grad_.shape}")
+                                self.log(str(e))
+                                raise
 
                     if grads_delta is not None:
                         deltaP.add_(grads_delta, alpha=-float(alpha))
@@ -151,7 +160,12 @@ class RecurrenceExperiment(Experiment):
 
         loss_sum = loss_sum / total_samples
 
-        grads = torch.autograd.grad(loss_sum, params, create_graph=False)
+        grads = torch.autograd.grad(
+            loss_sum, 
+            params, 
+            create_graph=False,
+            allow_unused=True
+        )
 
         avg_grads = {
             name: g.detach().cpu().numpy()

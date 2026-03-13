@@ -84,9 +84,10 @@ def generate_client_fn(context, files, test_file):
 
         backbone = RecurrenceModel.RecurrenceModel(
             context,
-            num_classes=NUM_CLASSES,
+            num_classes=NUM_CLASSES,  # usado só para classifier (não é o embedding)
             num_channels=NUM_CHANNELS,
             suffix=cid,
+            batch_norm=False,
         )
         emb_dim = int(backbone.base_model.last_channel)
 
