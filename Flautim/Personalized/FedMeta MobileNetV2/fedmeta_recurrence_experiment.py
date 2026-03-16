@@ -95,6 +95,12 @@ class RecurrenceExperiment(Experiment):
                 with torch.no_grad(): 
                     for param, grad_ in zip(model.parameters(), grads):
                         if grad_ is not None:  
+                            self.log(
+                                f"param shape: {param.shape}", object_id=self.id
+                            )
+                            self.log(
+                                f"grad_ shape: {grad_.shape}", object_id=self.id
+                            )
                             param -= (alpha * grad_) 
 
                 # Clear tensors to avoid graph accumulation
