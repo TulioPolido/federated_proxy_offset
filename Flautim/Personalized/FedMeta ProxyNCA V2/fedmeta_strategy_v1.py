@@ -16,6 +16,18 @@ from flwr.common.logger import log
 from flwr.server.client_proxy import ClientProxy
 from flwr.server.strategy.aggregate import aggregate, weighted_loss_avg
 
+def aggregate_grads_by_name(grads_results):
+    # grads_results: List[Tuple[dict[str, np.ndarray], int]]
+    total = sum(n for _, n in grads_results)
+    out = {}
+    for grads_dict, n in grads_results:
+        w = n / total
+        for k, g in grads_dict.items():
+            if k not in out:
+                out[k] = g * w
+            else:
+                out[k] += g * w
+    return out
 
 def fedmeta_update_maml(
     net: torch.nn.Module,
@@ -30,12 +42,16 @@ def fedmeta_update_maml(
     net.load_state_dict(state_dict, strict=True)
 
     optimizer = torch.optim.Adam(
-        list(net.parameters()), lr=beta, weight_decay=weight_decay
+        net.parameters(), lr=beta, weight_decay=weight_decay
     )
 
     # ---- ASSIGN GRADS ----
-    for (name, param), grad_ins in zip(net.named_parameters(), gradients_aggregated):
-        param.grad = torch.tensor(grad_ins, dtype=param.dtype)
+    for name, param in net.named_parameters():
+        grad_ = gradients_aggregated.get(name, None)
+        if grad_ is None:
+            param.grad = None
+        else:
+            param.grad = torch.tensor(grad_, dtype=param.dtype, device=param.device)
 
     # ---- OPTIMIZER STEP ----
     optimizer.step()
@@ -89,15 +105,15 @@ class FedMeta(flwr.server.strategy.FedAvg):
 
             try:
                 with np.load(file_path) as data:
-                    grads = [data[key] for key in data]
+                    grads_dict = {k: data[k] for k in data.files}
             except FileNotFoundError:
                 log(ERROR, f"File not found: {file_path}")
                 raise
 
-            grads_results.append((grads, fit_res.num_examples))
+            grads_results.append((grads_dict, fit_res.num_examples))
 
         # Aggregate gradients
-        gradients_aggregated = aggregate(grads_results)
+        gradients_aggregated = aggregate_grads_by_name(grads_results)
 
         weights_prime = fedmeta_update_maml(
             net=self.net,
