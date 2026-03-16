@@ -16,10 +16,10 @@ from meta_metric_model import MetaMetricModel
 from fedmeta_strategy_v1 import FedMeta
 
 
-DATASET = "PAMAP"
+DATASET = "WISDM"
 NUM_CHANNELS = 6
 BATCH_SIZE = 16
-NUM_ROUNDS = 500
+NUM_ROUNDS = 2000
 NUM_EPOCHS = 1
 GRADIENT_STEP = 2
 EMB_DIM = 64
@@ -68,7 +68,7 @@ def generate_server_fn(context, eval_fn=None):
             on_fit_config_fn=fit_config,
             on_evaluate_config_fn=fit_config,
             use_ema=USE_EMA,
-            smoothing_weight=SMOOTHING_WEIGHT
+            smoothing_weight=SMOOTHING_WEIGHT,
         )
 
         config = ServerConfig(num_rounds=NUM_ROUNDS)
@@ -120,11 +120,7 @@ def generate_client_fn(context, files, test_file):
         )
 
         return RecurrenceExperiment(
-            context=context,
-            net=model,
-            dataset=dataset,
-            client_name=cid,
-            cfg=cfg
+            context=context, net=model, dataset=dataset, client_name=cid, cfg=cfg
         ).to_client()
 
     return create_client_fn
