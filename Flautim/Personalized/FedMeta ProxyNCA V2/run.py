@@ -133,8 +133,8 @@ if __name__ == "__main__":
     fl.log(f"Using random seed: {seed}")
 
     if DATASET == "WISDM":
-        TOTAL_USERS = 10
-        NUM_CLIENTS = 8
+        TOTAL_USERS = 51
+        NUM_CLIENTS = 41
         TEST_USERS = TOTAL_USERS - NUM_CLIENTS
         NUM_CLASSES = 5
         WINDOW_SIZE = 256
