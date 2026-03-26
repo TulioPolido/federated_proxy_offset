@@ -80,7 +80,11 @@ def generate_server_fn(context, eval_fn=None):
 def generate_client_fn(context, files, test_file):
     def create_client_fn(context_flwr):
         cid = int(context_flwr.node_config["partition-id"])
-        train_file = files[cid]
+        try:
+            train_file = files[cid]
+        except IndexError:
+            fl.log(f"Client {cid} not found in files")
+            return None
 
         backbone = RecurrenceModel.RecurrenceModel(
             context,
@@ -142,7 +146,7 @@ if __name__ == "__main__":
         ALPHA = 5e-3
         WEIGHT_DECAY = 1.1e-5
         FRACTION_FIT = 0.1
-        FRACTION_EVALUATE = 0.2
+        FRACTION_EVALUATE = 0.4
 
         all_files = [i for i in range(1, TOTAL_USERS + 1) if i not in [38, 41, 44]]
         test_users = random.sample(all_files, TEST_USERS)
@@ -183,12 +187,12 @@ if __name__ == "__main__":
         fl.log(f"Train users: {train_users}")
         fl.log(f"Test users: {test_users}")
 
-        files = [
-            torch.load(
+        files = {
+            i: torch.load(
                 f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
             )
             for i in train_users
-        ]
+        }
         test_files = [
             torch.load(
                 f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
