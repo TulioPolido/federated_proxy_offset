@@ -20,10 +20,10 @@ NUM_CHANNELS = 6
 BATCH_SIZE = 16
 NUM_ROUNDS = 500
 NUM_EPOCHS = 1
-GRADIENT_STEP = 2
+GRADIENT_STEP = 1
 EMB_DIM = 64
-BETA = 5e-5
-SUPPORT_RATIO = 0.3
+BETA = 1e-5
+SUPPORT_RATIO = 0.4
 SMOOTHING_WEIGHT = 0.95
 USE_EMA = False
 USE_LOSO = True
@@ -133,9 +133,9 @@ if __name__ == "__main__":
             NUM_CLASSES = 7
             WINDOW_SIZE = 1024
             STRIDE = 256
-            LEARNING_RATE = 5e-3
+            LEARNING_RATE = 1e-3
             WEIGHT_DECAY = 6.7e-5
-            FRACTION_FIT = 0.8
+            FRACTION_FIT = 1.0
             FRACTION_EVALUATE = 1.0
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
