@@ -80,11 +80,7 @@ def generate_server_fn(context, eval_fn=None):
 def generate_client_fn(context, files, test_file):
     def create_client_fn(context_flwr):
         cid = int(context_flwr.node_config["partition-id"])
-        try:
-            train_file = files[cid]
-        except IndexError:
-            fl.log(f"Client {cid} not found in files")
-            return None
+        train_file = files[cid]
 
         backbone = RecurrenceModel.RecurrenceModel(
             context,
@@ -148,7 +144,7 @@ if __name__ == "__main__":
         FRACTION_FIT = 0.1
         FRACTION_EVALUATE = 0.4
 
-        all_files = [i for i in range(1, TOTAL_USERS + 1) if i not in [38, 41, 44]]
+        all_files = [i for i in range(1, TOTAL_USERS + 1)]
         test_users = random.sample(all_files, TEST_USERS)
         train_users = [f for f in all_files if f not in test_users]
 
