@@ -15,10 +15,10 @@ if MODEL == "MobileNetV2WithoutBatchNorm":
 elif MODEL == "MobileNetV2":
     from RecurrenceModel import RecurrenceModel as Model
 
-DATASET = "PAMAP"
+DATASET = "WISDM"
 NUM_CHANNELS = 6
 BATCH_SIZE = 16
-NUM_ROUNDS = 500
+NUM_ROUNDS = 2000
 NUM_EPOCHS = 1
 GRADIENT_STEP = 1
 EMB_DIM = 64
