@@ -18,12 +18,12 @@ elif MODEL == "MobileNetV2":
 DATASET = "WISDM"
 NUM_CHANNELS = 6
 BATCH_SIZE = 16
-NUM_ROUNDS = 2000
+NUM_ROUNDS = 3000
 NUM_EPOCHS = 1
-GRADIENT_STEP = 1
+GRADIENT_STEP = 2
 EMB_DIM = 64
 BETA = 1e-5
-SUPPORT_RATIO = 0.4
+SUPPORT_RATIO = 0.3
 SMOOTHING_WEIGHT = 0.95
 USE_EMA = False
 USE_LOSO = True
@@ -84,6 +84,7 @@ def generate_client_fn(context, files, test_file):
                 use_rotation=True,
                 support_ratio=SUPPORT_RATIO,
                 num_workers=0,
+                batch_size=BATCH_SIZE,
             )
         else:
             dataset = RecurrenceDataset(
@@ -175,7 +176,7 @@ if __name__ == "__main__":
             LEARNING_RATE = 5e-3
             WEIGHT_DECAY = 1.1e-5
             FRACTION_FIT = 0.1
-            FRACTION_EVALUATE = 0.2
+            FRACTION_EVALUATE = 0.4
 
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
