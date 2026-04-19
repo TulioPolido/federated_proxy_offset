@@ -74,57 +74,39 @@ class RecurrenceExperiment(Experiment):
     def train_model(
         self, model, adapted_backbone, train_loader, alpha, gradient_step=5
     ):
-        """Train with minimal memory footprint."""
         model.train()
-        total_loss, total_samples = (0.0, 0)
+        total_loss, total_samples = 0.0, 0
 
         for _ in range(gradient_step):
             for data, labels in train_loader:
-                data, labels = (
-                    data.float().to(self.device),
-                    labels.long().to(self.device),
-                )
+                data = data.float().to(self.device)
+                labels = labels.long().to(self.device)
 
+                proxies_eff = model.proxies  # 🔥 sem delta
 
-                # Mixed precision forward
                 with autocast(enabled=True):
                     emb = extract_embeddings(adapted_backbone, data)
-                    loss_proxy = self.loss_fn(emb, model.proxies, labels)
-                    loss = loss_proxy
+                    loss = self.loss_fn(emb, proxies_eff, labels)
 
                 total_loss += float(loss.detach().cpu()) * labels.size(0)
                 total_samples += labels.size(0)
 
                 params = list(adapted_backbone.parameters())
+
                 grads = torch.autograd.grad(
-                    loss, 
-                    params, 
-                    retain_graph=False, 
-                    create_graph=False, 
-                    allow_unused=True
+                    loss,
+                    params,
+                    retain_graph=False,
+                    create_graph=False,
+                    allow_unused=True,
                 )
 
-                grads_backbone = grads[:-1]
-                grads_delta = grads[-1]
-
-                # Update parameters without tracking gradients
                 with torch.no_grad():
-                    for param, grad_ in zip(params, grads_backbone):
+                    for param, grad_ in zip(params, grads):
                         if grad_ is not None:
                             param.add_(grad_, alpha=-float(alpha))
 
-                # Clear tensors to avoid graph accumulation
-                del (
-                    data,
-                    labels,
-                    emb,
-                    loss,
-                    loss_proxy,
-                    loss_reg,
-                    grads,
-                    grads_backbone,
-                    grads_delta,
-                )
+                del data, labels, emb, loss, grads
                 torch.cuda.empty_cache()
 
             torch.cuda.synchronize()
@@ -142,6 +124,8 @@ class RecurrenceExperiment(Experiment):
         names = [f"backbone.{n}" for n, _ in named_backbone] + ["proxies"]
         params = [p for _, p in named_backbone] + [model.proxies]
 
+        proxies_eff = model.proxies  # 🔥 sem delta
+
         for data, labels in query_loader:
             data = data.float().to(self.device)
             labels = labels.long().to(self.device)
@@ -151,9 +135,8 @@ class RecurrenceExperiment(Experiment):
 
             with torch.cuda.amp.autocast(enabled=True):
                 emb = extract_embeddings(adapted_backbone, data)
-                loss = self.loss_fn(emb, model.proxies, labels)
+                loss = self.loss_fn(emb, proxies_eff, labels)
 
-            # IMPORTANT: keep tensor, not .item()
             loss_sum += loss * batch_size
 
             del data, labels, emb, loss
@@ -175,23 +158,15 @@ class RecurrenceExperiment(Experiment):
 
         return avg_grads, total_samples, loss_sum.item()
 
-    def fit(
-        self, parameters: NDArrays, config: Dict[str, Scalar]
-    ) -> Tuple[NDArrays, int, Dict]:
+    def fit(self, parameters, config):
 
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
 
-        self.log(
-            f"{self.client_name} - FedMeta client training started",
-            object_id=self.id,
-        )
         self.epoch_fl = config["server_round"]
 
-        # === Load global model ===
         self.set_parameters(parameters)
 
-        # === Clear any old adapted model ===
         if hasattr(self, "adapted_backbone"):
             del self.adapted_backbone
             torch.cuda.empty_cache()
@@ -201,10 +176,9 @@ class RecurrenceExperiment(Experiment):
         for p in self.adapted_backbone.parameters():
             p.requires_grad_(True)
 
-        # === Reload dataloaders ===
         support_loader, query_loader = self.dataset.dataloader(validation=False)
 
-        # === Adapt model and calculate grads ===
+        # 🔥 sem deltaP
         loss = self.train_model(
             self.net,
             self.adapted_backbone,
@@ -217,23 +191,16 @@ class RecurrenceExperiment(Experiment):
             self.net, self.adapted_backbone, query_loader
         )
 
-        file_path = f"gradients_{self.client_name}.npz"
-        np.savez(file_path, **grads)
+        np.savez(f"gradients_{self.client_name}.npz", **grads)
 
-        # === Clear memory ===
         del self.adapted_backbone, grads
         torch.cuda.empty_cache()
         gc.collect()
 
-        self.log(
-            f"{self.client_name} - FedMeta client finished",
-            object_id=self.id,
-        )
-
         return (
             self.get_parameters({}),
             num_examples,
-            {"loss": loss, "query_loss": query_loss, "grads_file": self.client_name},
+            {"loss": loss, "query_loss": query_loss},
         )
 
     ################################
@@ -243,7 +210,6 @@ class RecurrenceExperiment(Experiment):
     def validation_loop(self, data_loaders):
         support_loader, query_loader = data_loaders
 
-        # ---- Inner loop adaptation ----
         self.adapted_backbone = copy.deepcopy(self.net.backbone).to(self.device)
 
         self.train_model(
@@ -255,6 +221,8 @@ class RecurrenceExperiment(Experiment):
         )
 
         self.adapted_backbone.eval()
+        proxies_eff = self.net.proxies  # 🔥 sem delta
+
         total_loss, total_samples = 0.0, 0
         all_preds, all_labels = [], []
 
@@ -262,47 +230,37 @@ class RecurrenceExperiment(Experiment):
             for X, y in query_loader:
                 X = X.float().to(self.device)
                 y = y.long().to(self.device)
-                batch_size = y.size(0)
 
                 with autocast(enabled=True):
                     emb = extract_embeddings(self.adapted_backbone, X)
-                    loss = self.loss_fn(emb, self.net.proxies, y)
+                    loss = self.loss_fn(emb, proxies_eff, y)
 
-                # logits for prediction (mirror loss settings)
                 if self.cfg.normalize_embeddings:
                     emb = torch.nn.functional.normalize(emb, p=2, dim=-1)
-                P = self.net.proxies
+
+                P = proxies_eff
                 if self.cfg.normalize_proxies:
                     P = torch.nn.functional.normalize(P, p=2, dim=-1)
 
-                with torch.cuda.amp.autocast(enabled=False):
-                    emb_fp32 = emb.float()
-                    P_fp32 = P.float()
-                    logits = (emb_fp32 @ P_fp32.t()) / float(self.cfg.temperature)
+                logits = (emb.float() @ P.float().t()) / float(self.cfg.temperature)
 
                 pred = torch.argmax(logits, dim=1)
-                total_loss += float(loss.detach().cpu()) * batch_size
-                total_samples += batch_size
-                all_preds.extend(pred.detach().cpu().tolist())
-                all_labels.extend(y.detach().cpu().tolist())
 
-                del (X, y, emb, loss, logits, pred)
-                torch.cuda.empty_cache()
+                total_loss += float(loss.detach().cpu()) * y.size(0)
+                total_samples += y.size(0)
+
+                all_preds.extend(pred.cpu().tolist())
+                all_labels.extend(y.cpu().tolist())
 
         loss_avg = total_loss / max(1, total_samples)
-        balanced_acc = balanced_accuracy_score(all_labels, all_preds)
-        precision = precision_score(
-            all_labels, all_preds, average="weighted", zero_division=0
-        )
-        f1 = f1_score(all_labels, all_preds, average="weighted")
 
         return (
             loss_avg,
             total_samples,
             {
-                "TEST_ACC": balanced_acc,
-                "TEST_PREC": precision,
-                "TEST_F1": f1,
+                "TEST_ACC": balanced_accuracy_score(all_labels, all_preds),
+                "TEST_PREC": precision_score(all_labels, all_preds, average="weighted", zero_division=0),
+                "TEST_F1": f1_score(all_labels, all_preds, average="weighted"),
             },
         )
 
