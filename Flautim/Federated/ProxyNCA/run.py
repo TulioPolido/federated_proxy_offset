@@ -3,7 +3,6 @@ from __future__ import annotations
 import random
 import torch
 import flautim as fl
-import flwr
 
 from flwr.server import ServerConfig, ServerAppComponents
 from flwr.common import ndarrays_to_parameters
@@ -29,6 +28,7 @@ SUPPORT_RATIO = 0.3
 SMOOTHING_WEIGHT = 0.95
 USE_EMA = False
 USE_LOSO = True
+train_users = []
 
 
 def fit_config(server_round: int):
@@ -58,7 +58,9 @@ def generate_server_fn(context, eval_fn=None):
         )
         params = ndarrays_to_parameters(net.get_parameters())
 
-        strategy = flwr.server.strategy.FedAvg(
+        strategy = FedMeta(
+            model=net,
+            lr_outer=BETA,
             initial_parameters=params,
             evaluate_metrics_aggregation_fn=weighted_average,
             fraction_fit=FRACTION_FIT,
@@ -66,6 +68,8 @@ def generate_server_fn(context, eval_fn=None):
             evaluate_fn=eval_fn,
             on_fit_config_fn=fit_config,
             on_evaluate_config_fn=fit_config,
+            use_ema=USE_EMA,
+            smoothing_weight=SMOOTHING_WEIGHT,
         )
 
         config = ServerConfig(num_rounds=NUM_ROUNDS)
@@ -77,7 +81,9 @@ def generate_server_fn(context, eval_fn=None):
 def generate_client_fn(context, files, test_file):
     def create_client_fn(context_flwr):
         cid = int(context_flwr.node_config["partition-id"])
-        train_file = files[cid]
+        user_id = train_users[cid]  
+
+        train_file = files[user_id]
 
         backbone = RecurrenceModel.RecurrenceModel(
             context,
@@ -106,9 +112,18 @@ def generate_client_fn(context, files, test_file):
             batch_size=BATCH_SIZE,
         )
 
+        cfg = HFMetaMetricConfig(
+            alpha=ALPHA,
+            inner_epochs=GRADIENT_STEP,
+            lambda_offset=1e-3,
+            temperature=0.1,
+            normalize_embeddings=True,
+            normalize_proxies=True,
+            use_amp=True,
+        )
 
         return RecurrenceExperiment(
-            context=context, net=model, dataset=dataset, client_name=cid
+            context=context, net=model, dataset=dataset, client_name=cid, cfg=cfg
         ).to_client()
 
     return create_client_fn

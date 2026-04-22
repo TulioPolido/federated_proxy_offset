@@ -158,15 +158,18 @@ class RecurrenceExperiment(Experiment):
 
         return avg_grads, total_samples, loss_sum.item()
 
-    def fit(self, parameters, config):
+    def fit(
+        self, parameters: NDArrays, config: Dict[str, Scalar]
+    ) -> Tuple[NDArrays, int, Dict]:
 
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
-
         self.epoch_fl = config["server_round"]
 
+        # === Load global model ===
         self.set_parameters(parameters)
 
+        # === Clear any old adapted model ===
         if hasattr(self, "adapted_backbone"):
             del self.adapted_backbone
             torch.cuda.empty_cache()
@@ -191,7 +194,8 @@ class RecurrenceExperiment(Experiment):
             self.net, self.adapted_backbone, query_loader
         )
 
-        np.savez(f"gradients_{self.client_name}.npz", **grads)
+        file_path = f"gradients_{self.client_name}.npz"
+        np.savez(file_path, **grads)
 
         del self.adapted_backbone, grads
         torch.cuda.empty_cache()
@@ -200,7 +204,7 @@ class RecurrenceExperiment(Experiment):
         return (
             self.get_parameters({}),
             num_examples,
-            {"loss": loss, "query_loss": query_loss},
+            {"loss": loss, "query_loss": query_loss, "grads_file": self.client_name},
         )
 
     ################################
@@ -269,12 +273,6 @@ class RecurrenceExperiment(Experiment):
     ) -> Tuple[float, int, Dict]:
         return_dic = {}
 
-        self.log(
-            f"{self.client_name} - FedMeta Model evaluation started",
-            object="experiment_evaluate",
-            object_id=self.id,
-        )
-
         self.set_parameters(parameters)
         self.epoch_fl = config["server_round"]
 
@@ -294,12 +292,7 @@ class RecurrenceExperiment(Experiment):
             return_dic[name] = float(values_metrics_validation[name])
 
         self.net.save()
-        self.log(
-            f"{self.client_name} - evaluation finished",
-            details="",
-            object="experiment_evaluate",
-            object_id=self.id,
-        )
+
 
         torch.cuda.empty_cache()
         return (
