@@ -154,12 +154,12 @@ if __name__ == "__main__":
         fl.log(f"Train users: {train_users}")
         fl.log(f"Test users: {test_users}")
 
-        files = [
-            torch.load(
+        files = {
+            i: torch.load(
                 f"./data/WISDM_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
             )
             for i in train_users
-        ]
+        }
         test_files = [
             torch.load(
                 f"./data/WISDM_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"

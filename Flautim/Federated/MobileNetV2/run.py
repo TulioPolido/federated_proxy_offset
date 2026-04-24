@@ -12,8 +12,8 @@ import random
 DATASET = "WISDM"
 NUM_CHANNELS = 6
 BATCH_SIZE = 32
-NUM_ROUNDS = 100
-NUM_EPOCHS = 10
+NUM_ROUNDS = 3000
+NUM_EPOCHS = 1
 
 
 def fit_config(server_round):
