@@ -80,7 +80,9 @@ def generate_server_fn(context, eval_fn=None):
 def generate_client_fn(context, files, test_file):
     def create_client_fn(context_flwr):
         cid = int(context_flwr.node_config["partition-id"])
-        train_file = files[cid]
+        user_id = train_users[cid]  
+
+        train_file = files[user_id]
 
         backbone = RecurrenceModel.RecurrenceModel(
             context,

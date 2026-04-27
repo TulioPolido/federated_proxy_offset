@@ -15,6 +15,8 @@ BATCH_SIZE = 32
 NUM_ROUNDS = 3000
 NUM_EPOCHS = 1
 
+train_users = []
+
 
 def fit_config(server_round):
     return {"server_round": server_round}
@@ -22,7 +24,6 @@ def fit_config(server_round):
 
 def generate_server_fn(context, eval_fn):
     def create_server_fn(context_flwr):
-        try:
             net = RecurrenceModel.RecurrenceModel(
                 context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=0
             )
@@ -40,24 +41,23 @@ def generate_server_fn(context, eval_fn):
 
             config = ServerConfig(num_rounds=NUM_ROUNDS)
             return ServerAppComponents(config=config, strategy=strategy)
-        except Exception as e:
-            print(f"Error in create_server_fn: {e}")
 
     return create_server_fn
 
 
 def generate_client_fn(context, files, test_file):
     def create_client_fn(context_flwr):
-        try:
             cid = int(context_flwr.node_config["partition-id"])
-            file = files[cid]
+            user_id = train_users[cid]  
 
-            model = RecurrenceModel.MobileNetV2WithoutBatchNorm(
+            train_file = files[user_id]
+
+            model = RecurrenceModel.RecurrenceModel(
                 context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=cid
             )
 
             dataset = FedMetaRecurrenceDataset.RecurrenceDataset(
-                train_file=file,
+                train_file=train_file,
                 test_file=test_file,
                 augment_multiplier=AUGMENTATION,
                 use_crop=False,
@@ -76,8 +76,6 @@ def generate_client_fn(context, files, test_file):
                 lr_step=LEARNING_RATE_STEP,
                 lr_gamma=LEARNING_RATE_GAMMA,
             ).to_client()
-        except Exception as e:
-            print(f"Error in create_client_fn: {e}")
 
     return create_client_fn
 
@@ -111,7 +109,6 @@ def generate_client_fn(context, files, test_file):
 
 
 if __name__ == "__main__":
-    try:
         context = fl.init()
         # Generate a random seed
         seed = random.randint(0, 2**32 - 1)
@@ -137,27 +134,25 @@ if __name__ == "__main__":
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
             # Shuffle and split
-            test_files = [7]
-            train_files = [i for i in all_files if i not in test_files]
+            test_users = [7]
+            train_users = [i for i in all_files if i not in test_users]
             # test_files = random.sample(all_files, TEST_USERS)
             # train_files = [f for f in all_files if f not in test_files]
-            fl.log(f"Train users: {train_files}")
-            fl.log(f"Test users: {test_files}")
+            fl.log(f"Train users: {train_users}")
+            fl.log(f"Test users: {test_users}")
 
             # Load training client files
-            files = [
-                torch.load(
+            files = {
+                i: torch.load(
                     f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
                 )
-                for i in train_files
-            ]
-
-            # Load and combine test files
+                for i in train_users
+            }
             test_files = [
                 torch.load(
                     f"./data/PAMAP_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
                 )
-                for i in test_files
+                for i in test_users
             ]
 
         elif DATASET == "WISDM":
@@ -179,25 +174,23 @@ if __name__ == "__main__":
             all_files = [i for i in range(1, TOTAL_USERS + 1)]
 
             # Shuffle and split
-            test_files = random.sample(all_files, TEST_USERS)
-            train_files = [f for f in all_files if f not in test_files]
-            fl.log(f"Train users: {train_files}")
-            fl.log(f"Test users: {test_files}")
+            test_users = random.sample(all_files, TEST_USERS)
+            train_users = [f for f in all_files if f not in test_users]
+            fl.log(f"Train users: {train_users}")
+            fl.log(f"Test users: {test_users}")
 
             # Load training client files
-            files = [
-                torch.load(
+            files = {
+                i: torch.load(
                     f"./data/WISDM_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
                 )
-                for i in train_files
-            ]
-
-            # Load and combine test files
+                for i in train_users
+            }
             test_files = [
                 torch.load(
                     f"./data/WISDM_processed_user_absFalse_{WINDOW_SIZE}_{STRIDE}_{i}_rgb_withGyro.pt"
                 )
-                for i in test_files
+                for i in test_users
             ]
 
         combined_test_data = {
@@ -216,5 +209,3 @@ if __name__ == "__main__":
             num_clients=NUM_CLIENTS,
             num_rounds=NUM_ROUNDS,
         )
-    except Exception as e:
-        fl.log(f"Error in run.py: {e}")
