@@ -23,7 +23,7 @@ def fit_config(server_round):
 def generate_server_fn(context, eval_fn):
     def create_server_fn(context_flwr):
         try:
-            net = RecurrenceModel.MobileNetV2WithoutBatchNorm(
+            net = RecurrenceModel.RecurrenceModel(
                 context, num_classes=NUM_CLASSES, num_channels=NUM_CHANNELS, suffix=0
             )
             params = ndarrays_to_parameters(net.get_parameters())
