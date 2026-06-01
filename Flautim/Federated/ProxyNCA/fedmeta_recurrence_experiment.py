@@ -13,6 +13,7 @@ from sklearn.metrics import (
     balanced_accuracy_score,
     f1_score,
     precision_score,
+    confusion_matrix,
 )
 from torch.cuda.amp import autocast
 
@@ -225,7 +226,7 @@ class RecurrenceExperiment(Experiment):
         )
 
         self.adapted_backbone.eval()
-        proxies_eff = self.net.proxies  # 🔥 sem delta
+        proxies_eff = self.net.proxies  # sem delta
 
         total_loss, total_samples = 0.0, 0
         all_preds, all_labels = [], []
@@ -258,9 +259,15 @@ class RecurrenceExperiment(Experiment):
 
         loss_avg = total_loss / max(1, total_samples)
 
+        # Confusion matrix in percentage (row-wise) with 1 decimal point
+        conf_matrix = confusion_matrix(all_labels, all_preds)
+        conf_matrix = conf_matrix.astype("float") / conf_matrix.sum(axis=1, keepdims=True) * 100
+        conf_matrix = np.round(conf_matrix, 1)
+
         return (
             loss_avg,
             total_samples,
+            conf_matrix,
             {
                 "TEST_ACC": balanced_accuracy_score(all_labels, all_preds),
                 "TEST_PREC": precision_score(all_labels, all_preds, average="weighted", zero_division=0),
@@ -276,9 +283,18 @@ class RecurrenceExperiment(Experiment):
         self.set_parameters(parameters)
         self.epoch_fl = config["server_round"]
 
-        loss, num_examples, values_metrics_validation = self.validation_loop(
+        loss, num_examples, conf_matrix, values_metrics_validation = self.validation_loop(
             self.dataset.dataloader(validation=True)
         )
+
+        #Conf-matrix visualization
+        if self.epoch_fl == 1 or self.epoch_fl % 1000 == 0:
+            self.log(
+                f"Round {self.epoch_fl} - Client {self.client_name} - Confusion Matrix Visualization: \n{conf_matrix}",
+                object_id=self.id,
+            )
+
+
         values_metrics_validation["LOSS"] = loss
 
         for name in values_metrics_validation:

@@ -16,10 +16,10 @@ from meta_metric_model import MetaMetricModel
 from fedmeta_strategy_v1 import FedMeta
 
 
-DATASET = "WISDM"
+DATASET = "PAMAP"
 NUM_CHANNELS = 6
 BATCH_SIZE = 16
-NUM_ROUNDS = 3000
+NUM_ROUNDS = 2000
 NUM_EPOCHS = 1
 GRADIENT_STEP = 2
 EMB_DIM = 64

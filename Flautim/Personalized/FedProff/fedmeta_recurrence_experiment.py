@@ -12,8 +12,10 @@ from flwr.common.typing import NDArrays, Scalar
 from sklearn.metrics import (
     balanced_accuracy_score,
     f1_score,
-    precision_score,
+    precision_score
 )
+
+from torchmetrics.classification import MulticlassConfusionMatrix
 from torch.cuda.amp import autocast
 
 from proxy_nca_loss import ProxyNCALoss, ProxyNCAConfig
@@ -189,10 +191,10 @@ class RecurrenceExperiment(Experiment):
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
 
-        self.log(
-            f"{self.client_name} - FedMeta client training started",
-            object_id=self.id,
-        )
+        # self.log(
+        #     f"{self.client_name} - FedMeta client training started",
+        #     object_id=self.id,
+        # )
         self.epoch_fl = config["server_round"]
 
         # === Load global model ===
@@ -238,10 +240,10 @@ class RecurrenceExperiment(Experiment):
         torch.cuda.empty_cache()
         gc.collect()
 
-        self.log(
-            f"{self.client_name} - FedMeta client finished",
-            object_id=self.id,
-        )
+        # self.log(
+        #     f"{self.client_name} - FedMeta client finished",
+        #     object_id=self.id,
+        # )
 
         return (
             self.get_parameters({}),
@@ -307,16 +309,24 @@ class RecurrenceExperiment(Experiment):
                 del (X, y, emb, loss, logits, pred)
                 torch.cuda.empty_cache()
 
+        conf_matrix = MulticlassConfusionMatrix(
+            num_classes=self.net.num_classes,
+            normalize="true",
+        ).to(self.device)
+        conf_matrix.update(torch.tensor(all_preds).to(self.device), torch.tensor(all_labels).to(self.device))
+
         loss_avg = total_loss / max(1, total_samples)
         balanced_acc = balanced_accuracy_score(all_labels, all_preds)
         precision = precision_score(
             all_labels, all_preds, average="weighted", zero_division=0
         )
         f1 = f1_score(all_labels, all_preds, average="weighted")
+        conf = conf_matrix.compute().cpu().numpy()
 
         return (
             loss_avg,
             total_samples,
+            conf,
             {
                 "TEST_ACC": balanced_acc,
                 "TEST_PREC": precision,
@@ -329,16 +339,16 @@ class RecurrenceExperiment(Experiment):
     ) -> Tuple[float, int, Dict]:
         return_dic = {}
 
-        self.log(
-            f"{self.client_name} - FedMeta Model evaluation started",
-            object="experiment_evaluate",
-            object_id=self.id,
-        )
+        # self.log(
+        #     f"{self.client_name} - FedMeta Model evaluation started",
+        #     object="experiment_evaluate",
+        #     object_id=self.id,
+        # )
 
         self.set_parameters(parameters)
         self.epoch_fl = config["server_round"]
 
-        loss, num_examples, values_metrics_validation = self.validation_loop(
+        loss, num_examples, conf_matrix, values_metrics_validation = self.validation_loop(
             self.dataset.dataloader(validation=True)
         )
         values_metrics_validation["LOSS"] = loss
@@ -353,13 +363,20 @@ class RecurrenceExperiment(Experiment):
             )
             return_dic[name] = float(values_metrics_validation[name])
 
+        #Conf-matrix visualization
+        if self.epoch_fl % 1000 == 0:
+            self.log(
+                f"Round {self.epoch_fl} - Client {self.client_name} - Confusion Matrix Visualization: \n{conf_matrix}",
+                object_id=self.id,
+            )
+
         self.net.save()
-        self.log(
-            f"{self.client_name} - evaluation finished",
-            details="",
-            object="experiment_evaluate",
-            object_id=self.id,
-        )
+        # self.log(
+        #     f"{self.client_name} - evaluation finished",
+        #     details="",
+        #     object="experiment_evaluate",
+        #     object_id=self.id,
+        # )
 
         torch.cuda.empty_cache()
         return (
