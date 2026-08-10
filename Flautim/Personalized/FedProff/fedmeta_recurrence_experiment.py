@@ -3,6 +3,7 @@ import gc
 from collections import OrderedDict
 from typing import Dict, Tuple
 from dataclasses import dataclass
+import json
 
 import numpy as np
 import torch
@@ -255,13 +256,164 @@ class RecurrenceExperiment(Experiment):
     # TESTING FUNCTIONS ######
     ################################
 
+    def log_embedding_space(
+        self,
+        adapted_backbone,
+        proxies_eff,
+        query_loader,
+        round_number,
+        max_samples_per_class=50,
+    ):
+        """
+        Logs original high-dimensional embeddings and effective proxies.
+
+        No PCA or dimensionality reduction is performed here.
+        PCA is performed later by the external plotting script.
+        """
+
+        adapted_backbone.eval()
+
+        embeddings = []
+        labels = []
+        samples_per_class = {}
+
+        # ---------------------------------------------------------
+        # Collect embeddings
+        # ---------------------------------------------------------
+
+        with torch.no_grad():
+
+            for X, y in query_loader:
+
+                X = X.float().to(self.device)
+                y = y.long().to(self.device)
+
+                with autocast(enabled=self.cfg.use_amp):
+                    emb = extract_embeddings(adapted_backbone, X)
+
+                # Move to CPU immediately
+                emb = emb.float().cpu().numpy()
+                y_np = y.cpu().numpy()
+
+                for e, label in zip(emb, y_np):
+
+                    label = int(label)
+
+                    # Limit number of examples per class
+                    if samples_per_class.get(label, 0) >= max_samples_per_class:
+                        continue
+
+                    embeddings.append(e)
+                    labels.append(label)
+
+                    samples_per_class[label] = (
+                        samples_per_class.get(label, 0) + 1
+                    )
+
+                # Stop when every class has enough samples
+                if len(samples_per_class) >= self.net.num_classes:
+                    if all(
+                        samples_per_class.get(c, 0) >= max_samples_per_class
+                        for c in range(self.net.num_classes)
+                    ):
+                        break
+
+                del X, y, emb
+
+        if len(embeddings) == 0:
+            return
+
+        embeddings = np.asarray(embeddings, dtype=np.float32)
+        labels = np.asarray(labels, dtype=np.int64)
+
+        # ---------------------------------------------------------
+        # Original effective proxies
+        # ---------------------------------------------------------
+
+        proxies = (
+            proxies_eff
+            .detach()
+            .float()
+            .cpu()
+            .numpy()
+            .astype(np.float32)
+        )
+
+        # ---------------------------------------------------------
+        # Build JSON-compatible structure
+        # ---------------------------------------------------------
+
+        embedding_data = {
+            "type": "embedding_space",
+
+            "round": int(round_number),
+
+            "client": int(self.client_name),
+
+            "embedding_dimension": int(embeddings.shape[1]),
+
+            "num_examples": int(embeddings.shape[0]),
+
+            "num_proxies": int(proxies.shape[0]),
+
+            "examples": [
+                {
+                    "embedding": [
+                        float(x) for x in embedding
+                    ],
+                    "label": int(label),
+                }
+                for embedding, label
+                in zip(embeddings, labels)
+            ],
+
+            "proxies": [
+                {
+                    "embedding": [
+                        float(x) for x in proxy
+                    ],
+                    "label": int(i),
+                }
+                for i, proxy in enumerate(proxies)
+            ],
+        }
+
+        # ---------------------------------------------------------
+        # Log
+        # ---------------------------------------------------------
+
+        self.log(
+            "EMBEDDING_SPACE_JSON "
+            + json.dumps(
+                embedding_data,
+                separators=(",", ":"),
+            ),
+            object_id=self.id,
+        )
+
+        # ---------------------------------------------------------
+        # Free memory
+        # ---------------------------------------------------------
+
+        del embeddings
+        del labels
+        del proxies
+        del embedding_data
+
+        torch.cuda.empty_cache()
+
     def validation_loop(self, data_loaders):
         support_loader, query_loader = data_loaders
 
         # ---- Inner loop adaptation ----
-        self.adapted_backbone = copy.deepcopy(self.net.backbone).to(self.device)
+        self.adapted_backbone = copy.deepcopy(
+            self.net.backbone
+        ).to(self.device)
+
         deltaP = torch.zeros_like(
-            self.net.proxies, device=self.device, requires_grad=True
+            self.net.proxies,
+            device=self.device,
+            requires_grad=True,
         )
 
         self.train_model(
@@ -274,54 +426,305 @@ class RecurrenceExperiment(Experiment):
         )
 
         self.adapted_backbone.eval()
+
+        # Effective personalized proxies
         proxies_eff = self.net.proxies + deltaP.detach()
-        total_loss, total_samples = 0.0, 0
-        all_preds, all_labels = [], []
+
+        total_loss = 0.0
+        total_samples = 0
+
+        all_preds = []
+        all_labels = []
+
+        # =========================================================
+        # Embedding-space logging
+        # =========================================================
+
+        collect_embeddings = (
+            self.epoch_fl == 1
+            or self.epoch_fl % 1000 == 0
+        )
+
+        embedding_list = []
+        embedding_label_list = []
+
+        samples_per_class = {}
+        max_samples_per_class = 50
+
+        # =========================================================
+        # Query evaluation
+        # =========================================================
 
         with torch.no_grad():
+
             for X, y in query_loader:
+
                 X = X.float().to(self.device)
                 y = y.long().to(self.device)
+
                 batch_size = y.size(0)
 
                 with autocast(enabled=True):
-                    emb = extract_embeddings(self.adapted_backbone, X)
-                    loss = self.loss_fn(emb, proxies_eff, y)
+                    emb = extract_embeddings(
+                        self.adapted_backbone,
+                        X,
+                    )
 
-                # logits for prediction (mirror loss settings)
+                    loss = self.loss_fn(
+                        emb,
+                        proxies_eff,
+                        y,
+                    )
+
+                # -------------------------------------------------
+                # Collect original embeddings
+                # -------------------------------------------------
+
+                if collect_embeddings:
+
+                    emb_cpu = emb.detach().float().cpu()
+                    y_cpu = y.detach().cpu()
+
+                    for embedding, label in zip(
+                        emb_cpu,
+                        y_cpu,
+                    ):
+
+                        label = int(label)
+
+                        if (
+                            samples_per_class.get(label, 0)
+                            >= max_samples_per_class
+                        ):
+                            continue
+
+                        embedding_list.append(
+                            embedding.numpy()
+                        )
+
+                        embedding_label_list.append(
+                            label
+                        )
+
+                        samples_per_class[label] = (
+                            samples_per_class.get(label, 0)
+                            + 1
+                        )
+
+                # -------------------------------------------------
+                # Classification logits
+                # -------------------------------------------------
+
                 if self.cfg.normalize_embeddings:
-                    emb = torch.nn.functional.normalize(emb, p=2, dim=-1)
-                P = proxies_eff
-                if self.cfg.normalize_proxies:
-                    P = torch.nn.functional.normalize(P, p=2, dim=-1)
+                    emb = torch.nn.functional.normalize(
+                        emb,
+                        p=2,
+                        dim=-1,
+                    )
 
-                with torch.cuda.amp.autocast(enabled=False):
+                P = proxies_eff
+
+                if self.cfg.normalize_proxies:
+                    P = torch.nn.functional.normalize(
+                        P,
+                        p=2,
+                        dim=-1,
+                    )
+
+                with torch.cuda.amp.autocast(
+                    enabled=False
+                ):
+
                     emb_fp32 = emb.float()
                     P_fp32 = P.float()
-                    logits = (emb_fp32 @ P_fp32.t()) / float(self.cfg.temperature)
 
-                pred = torch.argmax(logits, dim=1)
-                total_loss += float(loss.detach().cpu()) * batch_size
+                    logits = (
+                        emb_fp32 @ P_fp32.t()
+                    ) / float(
+                        self.cfg.temperature
+                    )
+
+                pred = torch.argmax(
+                    logits,
+                    dim=1,
+                )
+
+                # -------------------------------------------------
+                # Metrics
+                # -------------------------------------------------
+
+                total_loss += (
+                    float(
+                        loss.detach().cpu()
+                    )
+                    * batch_size
+                )
+
                 total_samples += batch_size
-                all_preds.extend(pred.detach().cpu().tolist())
-                all_labels.extend(y.detach().cpu().tolist())
 
-                del (X, y, emb, loss, logits, pred)
+                all_preds.extend(
+                    pred.detach()
+                    .cpu()
+                    .tolist()
+                )
+
+                all_labels.extend(
+                    y.detach()
+                    .cpu()
+                    .tolist()
+                )
+
+                # -------------------------------------------------
+                # Free batch memory
+                # -------------------------------------------------
+
+                del (
+                    X,
+                    y,
+                    emb,
+                    loss,
+                    logits,
+                    pred,
+                )
+
                 torch.cuda.empty_cache()
+
+        # =========================================================
+        # Log original embedding space
+        # =========================================================
+
+        if (
+            collect_embeddings
+            and len(embedding_list) > 0
+        ):
+
+            embeddings_np = np.asarray(
+                embedding_list,
+                dtype=np.float32,
+            )
+
+            labels_np = np.asarray(
+                embedding_label_list,
+                dtype=np.int64,
+            )
+
+            proxies_np = (
+                proxies_eff
+                .detach()
+                .float()
+                .cpu()
+                .numpy()
+                .astype(np.float32)
+            )
+
+            embedding_data = {
+                "type": "embedding_space",
+
+                "round": int(self.epoch_fl),
+
+                "client": int(self.client_name),
+
+                "embedding_dimension": int(
+                    embeddings_np.shape[1]
+                ),
+
+                "num_examples": int(
+                    embeddings_np.shape[0]
+                ),
+
+                "num_proxies": int(
+                    proxies_np.shape[0]
+                ),
+
+                "examples": [
+                    {
+                        "embedding": [
+                            float(v)
+                            for v in embedding
+                        ],
+                        "label": int(label),
+                    }
+                    for embedding, label in zip(
+                        embeddings_np,
+                        labels_np,
+                    )
+                ],
+
+                "proxies": [
+                    {
+                        "embedding": [
+                            float(v)
+                            for v in proxy
+                        ],
+                        "label": int(i),
+                    }
+                    for i, proxy in enumerate(
+                        proxies_np
+                    )
+                ],
+            }
+
+            self.log(
+                "EMBEDDING_SPACE_JSON "
+                + json.dumps(
+                    embedding_data,
+                    separators=(",", ":"),
+                ),
+                object_id=self.id,
+            )
+
+            del embeddings_np
+            del labels_np
+            del proxies_np
+            del embedding_data
+
+        # =========================================================
+        # Confusion matrix
+        # =========================================================
 
         conf_matrix = MulticlassConfusionMatrix(
             num_classes=self.net.num_classes,
             normalize="true",
         ).to(self.device)
-        conf_matrix.update(torch.tensor(all_preds).to(self.device), torch.tensor(all_labels).to(self.device))
 
-        loss_avg = total_loss / max(1, total_samples)
-        balanced_acc = balanced_accuracy_score(all_labels, all_preds)
-        precision = precision_score(
-            all_labels, all_preds, average="weighted", zero_division=0
+        conf_matrix.update(
+            torch.tensor(all_preds).to(self.device),
+            torch.tensor(all_labels).to(self.device),
         )
-        f1 = f1_score(all_labels, all_preds, average="weighted")
-        conf = conf_matrix.compute().cpu().numpy()
+
+        # =========================================================
+        # Metrics
+        # =========================================================
+
+        loss_avg = (
+            total_loss
+            / max(1, total_samples)
+        )
+
+        balanced_acc = balanced_accuracy_score(
+            all_labels,
+            all_preds,
+        )
+
+        precision = precision_score(
+            all_labels,
+            all_preds,
+            average="weighted",
+            zero_division=0,
+        )
+
+        f1 = f1_score(
+            all_labels,
+            all_preds,
+            average="weighted",
+        )
+
+        conf = (
+            conf_matrix
+            .compute()
+            .cpu()
+            .numpy()
+        )
 
         return (
             loss_avg,
