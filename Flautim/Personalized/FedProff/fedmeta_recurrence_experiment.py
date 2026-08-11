@@ -665,7 +665,7 @@ class RecurrenceExperiment(Experiment):
             }
 
             self.log(
-                "EMBEDDING_SPACE_JSON "
+                "EMBEDDING_SPACE_JSON: \n"
                 + json.dumps(
                     embedding_data,
                     separators=(",", ":"),
@@ -766,12 +766,12 @@ class RecurrenceExperiment(Experiment):
             )
             return_dic[name] = float(values_metrics_validation[name])
 
-        #Conf-matrix visualization
-        if self.epoch_fl % 1000 == 0:
-            self.log(
-                f"Round {self.epoch_fl} - Client {self.client_name} - Confusion Matrix Visualization: \n{conf_matrix}",
-                object_id=self.id,
-            )
+        # #Conf-matrix visualization
+        # if self.epoch_fl % 1000 == 0:
+        #     self.log(
+        #         f"Round {self.epoch_fl} - Client {self.client_name} - Confusion Matrix Visualization: \n{conf_matrix}",
+        #         object_id=self.id,
+        #     )
 
         self.net.save()
         # self.log(
