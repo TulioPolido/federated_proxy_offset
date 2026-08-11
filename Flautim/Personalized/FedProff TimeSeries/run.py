@@ -10,7 +10,7 @@ from flwr.common import ndarrays_to_parameters
 from flautim.pytorch.common import run_federated, weighted_average
 
 import RecurrenceModel
-from fedmeta_recurrence_dataset import RecurrenceDatasetLOSO
+from fedmeta_recurrence_dataset import TimeSeriesDatasetLOSO
 from fedmeta_recurrence_experiment import RecurrenceExperiment, HFMetaMetricConfig
 from meta_metric_model import MetaMetricModel
 from fedmeta_strategy_v1 import FedMeta
@@ -46,7 +46,7 @@ def generate_server_fn(context, eval_fn=None):
         )
 
         # Emb dim = 1280 no MobileNetV2
-        emb_dim = int(backbone.base_model.last_channel)
+        emb_dim = int(backbone.last_channel)
 
         net = MetaMetricModel(
             context,
@@ -91,7 +91,7 @@ def generate_client_fn(context, files, test_file):
             suffix=cid,
             batch_norm=False,
         )
-        emb_dim = int(backbone.base_model.last_channel)
+        emb_dim = int(backbone.last_channel)
 
         model = MetaMetricModel(
             context,
@@ -101,11 +101,9 @@ def generate_client_fn(context, files, test_file):
             suffix=cid,
         )
 
-        dataset = RecurrenceDatasetLOSO(
+        dataset = TimeSeriesDatasetLOSO(
             train_file=train_file,
             test_file=test_file,
-            augment_multiplier=2,
-            use_rotation=True,
             support_ratio=SUPPORT_RATIO,
             num_workers=0,
             batch_size=BATCH_SIZE,
