@@ -441,8 +441,9 @@ class RecurrenceExperiment(Experiment):
         # =========================================================
 
         collect_embeddings = (
-            self.epoch_fl == 1
-            or self.epoch_fl % 1000 == 0
+            (self.epoch_fl == 1
+            or self.epoch_fl % 1000 == 0) 
+            and self.client_name == 0
         )
 
         embedding_list = []
@@ -665,7 +666,7 @@ class RecurrenceExperiment(Experiment):
             }
 
             self.log(
-                "EMBEDDING_SPACE_JSON: \n"
+                "Round {self.epoch_fl} - Client {self.client_name} - EMBEDDING_SPACE_JSON: \n"
                 + json.dumps(
                     embedding_data,
                     separators=(",", ":"),
