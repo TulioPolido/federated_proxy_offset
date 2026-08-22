@@ -9,11 +9,7 @@ import torch
 import torch.nn as nn
 from flautim.pytorch.federated.Experiment import Experiment
 from flwr.common.typing import NDArrays, Scalar
-from sklearn.metrics import (
-    balanced_accuracy_score,
-    f1_score,
-    precision_score
-)
+from sklearn.metrics import balanced_accuracy_score, f1_score, precision_score
 
 from torchmetrics.classification import MulticlassConfusionMatrix
 from torch.cuda.amp import autocast
@@ -90,22 +86,22 @@ class RecurrenceExperiment(Experiment):
                 proxies_eff = model.proxies + deltaP  # P_client
 
                 # Mixed precision forward
-                with autocast(enabled=True):
-                    emb = extract_embeddings(adapted_backbone, data)
-                    loss_proxy = self.loss_fn(emb, proxies_eff, labels)
-                    loss_reg = self.cfg.lambda_offset * deltaP.pow(2).sum()
-                    loss = loss_proxy + loss_reg
+                # with autocast(enabled=True):
+                emb = extract_embeddings(adapted_backbone, data)
+                loss_proxy = self.loss_fn(emb, proxies_eff, labels)
+                loss_reg = self.cfg.lambda_offset * deltaP.pow(2).sum()
+                loss = loss_proxy + loss_reg
 
                 total_loss += float(loss.detach().cpu()) * labels.size(0)
                 total_samples += labels.size(0)
 
                 params = list(adapted_backbone.parameters())
                 grads = torch.autograd.grad(
-                    loss, 
-                    params + [deltaP], 
-                    retain_graph=False, 
-                    create_graph=False, 
-                    allow_unused=True
+                    loss,
+                    params + [deltaP],
+                    retain_graph=False,
+                    create_graph=False,
+                    allow_unused=True,
                 )
 
                 grads_backbone = grads[:-1]
@@ -158,9 +154,9 @@ class RecurrenceExperiment(Experiment):
             batch_size = labels.size(0)
             total_samples += batch_size
 
-            with torch.cuda.amp.autocast(enabled=True):
-                emb = extract_embeddings(adapted_backbone, data)
-                loss = self.loss_fn(emb, proxies_eff, labels)
+            # with torch.cuda.amp.autocast(enabled=True):
+            emb = extract_embeddings(adapted_backbone, data)
+            loss = self.loss_fn(emb, proxies_eff, labels)
 
             # IMPORTANT: keep tensor, not .item()
             loss_sum += loss * batch_size
@@ -284,9 +280,9 @@ class RecurrenceExperiment(Experiment):
                 y = y.long().to(self.device)
                 batch_size = y.size(0)
 
-                with autocast(enabled=True):
-                    emb = extract_embeddings(self.adapted_backbone, X)
-                    loss = self.loss_fn(emb, proxies_eff, y)
+                # with autocast(enabled=True):
+                emb = extract_embeddings(self.adapted_backbone, X)
+                loss = self.loss_fn(emb, proxies_eff, y)
 
                 # logits for prediction (mirror loss settings)
                 if self.cfg.normalize_embeddings:
@@ -295,10 +291,10 @@ class RecurrenceExperiment(Experiment):
                 if self.cfg.normalize_proxies:
                     P = torch.nn.functional.normalize(P, p=2, dim=-1)
 
-                with torch.cuda.amp.autocast(enabled=False):
-                    emb_fp32 = emb.float()
-                    P_fp32 = P.float()
-                    logits = (emb_fp32 @ P_fp32.t()) / float(self.cfg.temperature)
+                # with torch.cuda.amp.autocast(enabled=False):
+                emb_fp32 = emb.float()
+                P_fp32 = P.float()
+                logits = (emb_fp32 @ P_fp32.t()) / float(self.cfg.temperature)
 
                 pred = torch.argmax(logits, dim=1)
                 total_loss += float(loss.detach().cpu()) * batch_size
@@ -313,7 +309,10 @@ class RecurrenceExperiment(Experiment):
             num_classes=self.net.num_classes,
             normalize="true",
         ).to(self.device)
-        conf_matrix.update(torch.tensor(all_preds).to(self.device), torch.tensor(all_labels).to(self.device))
+        conf_matrix.update(
+            torch.tensor(all_preds).to(self.device),
+            torch.tensor(all_labels).to(self.device),
+        )
 
         loss_avg = total_loss / max(1, total_samples)
         balanced_acc = balanced_accuracy_score(all_labels, all_preds)
@@ -348,8 +347,8 @@ class RecurrenceExperiment(Experiment):
         self.set_parameters(parameters)
         self.epoch_fl = config["server_round"]
 
-        loss, num_examples, conf_matrix, values_metrics_validation = self.validation_loop(
-            self.dataset.dataloader(validation=True)
+        loss, num_examples, conf_matrix, values_metrics_validation = (
+            self.validation_loop(self.dataset.dataloader(validation=True))
         )
         values_metrics_validation["LOSS"] = loss
 
