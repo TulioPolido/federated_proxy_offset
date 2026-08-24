@@ -4,46 +4,46 @@ measures 001
 === Best Epoch Results per Experiment (averaged across users) ===
 
 Experiment A - User 0:
-Balanced Accuracy: 0.931371659775021
-Precision: 0.950020243573984
-F1 Score: 0.9493972347013668
+Balanced Accuracy: 0.9873949579831932
+Precision: 0.990019011406844
+F1 Score: 0.988710149166423
 
 Experiment A - User 1:
-Balanced Accuracy: 0.933204586182299
-Precision: 0.9489849935589996
-F1 Score: 0.9429084358478492
+Balanced Accuracy: 0.9727001911875862
+Precision: 0.9777496127306012
+F1 Score: 0.9772608122202784
 
 Experiment A - User 2:
-Balanced Accuracy: 0.894744332515615
-Precision: 0.9314313749540046
-F1 Score: 0.918645211490344
+Balanced Accuracy: 0.9582028366902317
+Precision: 0.96965850317644
+F1 Score: 0.9694031570457424
 
 Experiment A - User 3:
-Balanced Accuracy: 0.9112044817927172
-Precision: 0.9650449555447554
-F1 Score: 0.9608146447293412
+Balanced Accuracy: 0.9738050582551862
+Precision: 0.9727139189496604
+F1 Score: 0.9702208796908316
 
 Experiment A - User 4:
-Balanced Accuracy: 0.916088870330741
-Precision: 0.9429612309696652
-F1 Score: 0.9361777443591804
+Balanced Accuracy: 0.9733653461384554
+Precision: 0.981490625977318
+F1 Score: 0.9809468091739312
 
 Experiment A - User 5:
-Balanced Accuracy: 0.9048454937530568
-Precision: 0.9335774588239626
-F1 Score: 0.9273425301096856
+Balanced Accuracy: 0.983254171233711
+Precision: 0.9846446329336064
+F1 Score: 0.9816806874343148
 
 Experiment A - User 6:
-Balanced Accuracy: 0.9178920263757676
-Precision: 0.9360088809701916
-F1 Score: 0.9348755993615115
+Balanced Accuracy: 0.9802289611496772
+Precision: 0.9826860401955458
+F1 Score: 0.9811952341543536
 
 Experiment A (Averaged across users):
-Balanced Accuracy: 0.9156
-Precision: 0.9440
-F1 Score: 0.9386
+Balanced Accuracy: 0.9756
+Precision: 0.9799
+F1 Score: 0.9785
 
 === Average Across Experiments (user-averaged) ===
-Average Balanced Accuracy: 0.9156
-Average Precision: 0.9440
-Average F1 Score: 0.9386
+Average Balanced Accuracy: 0.9756
+Average Precision: 0.9799
+Average F1 Score: 0.9785
